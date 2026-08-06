@@ -29,7 +29,7 @@ async fn main() {
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string());
     std::fs::create_dir_all(&data_dir).ok();
 
-    let config = ProxyConfig::from_env();
+    let config = ProxyConfig::from_env_oss();
     let addr = format!("0.0.0.0:{}", config.port);
 
     tracing::info!(

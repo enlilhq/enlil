@@ -60,7 +60,7 @@ impl ProxyConfig {
     pub fn from_env() -> Self {
         Self {
             port: env_or("PORT", "8080").parse().unwrap_or(8080),
-            upstream_url: env_or("UPSTREAM_URL", "https://httpbin.org"),
+            upstream_url: env_or("UPSTREAM_URL", DEFAULT_UPSTREAM),
             upstream_routes: vec![
                 UpstreamRoute { path_prefix: "/v1/".into(), target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"), name: "OpenAI".into() },
                 UpstreamRoute { path_prefix: "/anthropic/".into(), target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"), name: "Anthropic".into() },
@@ -77,6 +77,48 @@ impl ProxyConfig {
         }
     }
 
+    /// Configuration for the **open-source, single-tenant** build.
+    ///
+    /// Identical to [`from_env`](Self::from_env) except that it does not touch any
+    /// of the multi-tenant/cloud fields. In particular it does not resolve a JWT
+    /// signing secret: the OSS server issues and validates no tokens (it has no
+    /// auth layer at all — the operator owns the process), so warning about a
+    /// missing `JWT_SECRET` would be noise that implies a security control the
+    /// OSS build does not claim to have.
+    ///
+    /// `jwt_secret` is therefore left empty here. This is only sound because no
+    /// OSS code path reads it; the cloud build must keep using `from_env`.
+    pub fn from_env_oss() -> Self {
+        Self {
+            jwt_secret: String::new(),
+            database_url: None,
+            require_auth: false,
+            admin_api_key: None,
+            ..Self::from_env_common()
+        }
+    }
+
+    /// The fields shared by both builds.
+    fn from_env_common() -> Self {
+        Self {
+            port: env_or("PORT", "8080").parse().unwrap_or(8080),
+            upstream_url: env_or("UPSTREAM_URL", DEFAULT_UPSTREAM),
+            upstream_routes: vec![
+                UpstreamRoute { path_prefix: "/v1/".into(), target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"), name: "OpenAI".into() },
+                UpstreamRoute { path_prefix: "/anthropic/".into(), target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"), name: "Anthropic".into() },
+                UpstreamRoute { path_prefix: "/mcp/".into(), target: env_or("MCP_UPSTREAM", "http://localhost:3001"), name: "MCP Server".into() },
+            ],
+            global_token_limit: env_or("GLOBAL_TOKEN_LIMIT", "100000").parse().unwrap_or(100_000),
+            cache_ttl_secs: env_or("CACHE_TTL_SECS", "900").parse().unwrap_or(900),
+            cache_max_capacity: env_or("CACHE_MAX_CAPACITY", "10000").parse().unwrap_or(10_000),
+            max_payload_bytes: env_or("MAX_PAYLOAD_BYTES", "1048576").parse().unwrap_or(1_048_576),
+            jwt_secret: String::new(),
+            database_url: None,
+            require_auth: false,
+            admin_api_key: None,
+        }
+    }
+
     pub fn resolve_upstream(&self, path: &str) -> &str {
         for route in &self.upstream_routes {
             if path.starts_with(&route.path_prefix) {
@@ -86,6 +128,13 @@ impl ProxyConfig {
         &self.upstream_url
     }
 }
+
+/// Fallback upstream for requests that match none of the configured route prefixes.
+///
+/// Deliberately a real provider rather than a public echo service: an audit and
+/// control plane must not silently forward unmatched agent traffic to a third-party
+/// endpoint the operator did not choose.
+const DEFAULT_UPSTREAM: &str = "https://api.openai.com";
 
 pub fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())

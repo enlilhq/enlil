@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test & lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Non-blocking: report formatting drift without failing the build.
+      - name: Format check
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      # Hard gate: lint must be clean.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Hard gate: the full suite. No external services required.
+      - name: Test
+        run: cargo test --verbose
+
+  overhead:
+    name: Governance overhead budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Enforces the per-request overhead budget on an optimized build, so a
+      # regression in the hot path fails the PR rather than shipping quietly.
+      - name: Proxy overhead benchmark
+        run: cargo test --release --test proxy_overhead_bench -- --nocapture
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

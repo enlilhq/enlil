@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enlil — Agent Control Plane</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2a2d3a;
+  --text: #e4e4e7;
+  --muted: #71717a;
+  --accent: #6366f1;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --blue: #3b82f6;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
+}
+header h1 { font-size: 1.5rem; font-weight: 600; }
+header h1 span { color: var(--accent); }
+.status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--muted); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* Stats grid */
+.stats-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem; margin-bottom: 2rem;
+}
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1rem;
+}
+.stat-card .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.red { color: var(--red); }
+.stat-card .value.orange { color: var(--orange); }
+.stat-card .value.blue { color: var(--blue); }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+.tab {
+  padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.875rem;
+  color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Panel */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Traces table */
+.traces-table { width: 100%; border-collapse: collapse; }
+.traces-table th, .traces-table td {
+  padding: 0.625rem 0.75rem; text-align: left; font-size: 0.8125rem;
+  border-bottom: 1px solid var(--border);
+}
+.traces-table th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.6875rem; letter-spacing: 0.05em; }
+.traces-table tr:hover { background: rgba(99,102,241,0.05); cursor: pointer; }
+.badge {
+  display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px;
+  font-size: 0.6875rem; font-weight: 500;
+}
+.badge-ok { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge-blocked { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge-cached { background: rgba(59,130,246,0.15); color: var(--blue); }
+.badge-alert { background: rgba(245,158,11,0.15); color: var(--orange); }
+
+/* Rules list */
+.rule-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;
+}
+.rule-card .rule-name { font-weight: 600; font-size: 0.875rem; }
+.rule-card .rule-action { font-size: 0.75rem; margin-top: 0.25rem; }
+.rule-card .rule-pattern { font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; font-family: monospace; }
+
+/* Trace detail modal */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  z-index: 100; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  max-width: 700px; width: 90vw; max-height: 80vh; overflow-y: auto; padding: 1.5rem;
+}
+.modal h2 { font-size: 1rem; margin-bottom: 1rem; }
+.modal pre {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 1rem; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap;
+}
+.modal .close-btn {
+  position: absolute; top: 1rem; right: 1rem; background: none; border: none;
+  color: var(--muted); cursor: pointer; font-size: 1.25rem;
+}
+
+/* Events feed */
+.event-item {
+  padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.8125rem;
+}
+.event-item .event-time { color: var(--muted); font-size: 0.75rem; font-family: monospace; }
+
+/* Responsive */
+@media (max-width: 640px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .traces-table { font-size: 0.75rem; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1><span>Enlil</span> Control Plane</h1>
+    <div class="status"><div class="status-dot"></div>Live</div>
+  </header>
+
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="traces">Traces</div>
+    <div class="tab" data-panel="rules">Rules</div>
+    <div class="tab" data-panel="events">Events</div>
+  </div>
+
+  <div class="panel active" id="panel-traces">
+    <table class="traces-table">
+      <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>Latency</th><th>Decision</th></tr></thead>
+      <tbody id="traces-body"></tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="panel-rules">
+    <div id="rules-list"></div>
+  </div>
+
+  <div class="panel" id="panel-events">
+    <div id="events-list"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h2 id="modal-title">Trace Detail</h2>
+    <pre id="modal-content"></pre>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+  });
+});
+
+// Modal
+const overlay = document.getElementById('modal-overlay');
+overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('active'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.classList.remove('active'); });
+
+function showTrace(id) {
+  fetch(API + '/api/traces/' + id)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('modal-title').textContent = 'Trace ' + id.slice(0, 8);
+      document.getElementById('modal-content').textContent = JSON.stringify(data, null, 2);
+      overlay.classList.add('active');
+    });
+}
+
+// Stats
+function loadStats() {
+  fetch(API + '/api/stats')
+    .then(r => r.json())
+    .then(s => {
+      const grid = document.getElementById('stats-grid');
+      grid.innerHTML = [
+        card('Requests', s.total_requests, ''),
+        card('Cache Hits', s.cache_hits, 'green'),
+        card('Policy Blocks', s.policy_blocks, 'red'),
+        card('Injection Blocks', s.injection_blocks, 'red'),
+        card('PII Redactions', s.pii_redactions, 'orange'),
+        card('Loop Breaks', s.loop_breaks, 'orange'),
+        card('Tokens Used', fmt(s.total_tokens_used), 'blue'),
+        card('Avg Latency', s.avg_latency_us + 'us', ''),
+      ].join('');
+    });
+}
+
+function card(label, value, color) {
+  return '<div class="stat-card"><div class="label">' + label + '</div><div class="value ' + color + '">' + value + '</div></div>';
+}
+
+function fmt(n) { return n > 1000000 ? (n/1000000).toFixed(1) + 'M' : n > 1000 ? (n/1000).toFixed(1) + 'K' : n; }
+
+// Traces
+function loadTraces() {
+  fetch(API + '/api/traces?limit=50')
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('traces-body');
+      tbody.innerHTML = (data.traces || []).map(t => {
+        const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : '-';
+        const decision = decisionBadge(t);
+        const latency = t.latency_ms ? t.latency_ms + 'ms' : '-';
+        return '<tr onclick="showTrace(\'' + t.trace_id + '\')">' +
+          '<td>' + time + '</td>' +
+          '<td>' + (t.method || '-') + '</td>' +
+          '<td>' + (t.path || t.model || '-') + '</td>' +
+          '<td>' + (t.status || '-') + '</td>' +
+          '<td>' + latency + '</td>' +
+          '<td>' + decision + '</td></tr>';
+      }).join('');
+    });
+}
+
+function decisionBadge(t) {
+  if (t.cache_hit) return '<span class="badge badge-cached">cached</span>';
+  if (t.blocked) return '<span class="badge badge-blocked">blocked</span>';
+  if (t.alerts && t.alerts.length) return '<span class="badge badge-alert">alert</span>';
+  return '<span class="badge badge-ok">pass</span>';
+}
+
+// Rules
+function loadRules() {
+  fetch(API + '/api/rules')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('rules-list');
+      list.innerHTML = (data.rules || []).map(r => {
+        const actionColor = r.action === 'block' ? 'red' : r.action === 'alert' ? 'orange' : 'blue';
+        return '<div class="rule-card">' +
+          '<div class="rule-name">' + esc(r.name) + '</div>' +
+          '<div class="rule-action"><span class="badge badge-' + (r.action === 'block' ? 'blocked' : r.action === 'alert' ? 'alert' : 'ok') + '">' + r.action + '</span></div>' +
+          '<div class="rule-pattern">' + esc(r.pattern || '') + '</div></div>';
+      }).join('');
+    });
+}
+
+// Events
+function loadEvents() {
+  fetch(API + '/api/events/recent')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('events-list');
+      list.innerHTML = (data.events || []).slice(0, 50).map(e => {
+        return '<div class="event-item"><span class="event-time">' + (e.timestamp || '') + '</span> ' + esc(e.event_type || e.kind || JSON.stringify(e)) + '</div>';
+      }).join('');
+    });
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Initial load + auto-refresh
+function refresh() { loadStats(); loadTraces(); loadEvents(); }
+refresh();
+loadRules();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

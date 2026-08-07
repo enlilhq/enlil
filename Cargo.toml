@@ -1,6 +1,6 @@
 [package]
 name = "enlil"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 description = "Vendor-neutral open-source control and audit plane for AI agent actions. Sits inline between your agents and any model or tool: enforce what each agent may do, and prove what it did."

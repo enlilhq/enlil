@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityRule {
@@ -53,7 +53,12 @@ fn compile_rule(rule: &SecurityRule) -> Option<Regex> {
         RuleCondition::BodyRegex(pattern) => match Regex::new(pattern) {
             Ok(r) => Some(r),
             Err(e) => {
-                tracing::error!("Rule '{}' has an invalid regex '{}': {}", rule.id, pattern, e);
+                tracing::error!(
+                    "Rule '{}' has an invalid regex '{}': {}",
+                    rule.id,
+                    pattern,
+                    e
+                );
                 None
             }
         },
@@ -76,7 +81,9 @@ impl RuleEngine {
     pub fn evaluate(&self, body: &str, tenant_id: &str, _tokens: u32) -> Vec<RuleMatch> {
         let mut matches = Vec::new();
         for (rule, compiled) in self.rules.iter().zip(self.compiled.iter()) {
-            if !rule.enabled { continue; }
+            if !rule.enabled {
+                continue;
+            }
             let triggered = match &rule.condition {
                 RuleCondition::BodyContains(pattern) => body.contains(pattern.as_str()),
                 RuleCondition::BodyRegex(_) => {
@@ -108,21 +115,27 @@ fn default_rules() -> Vec<SecurityRule> {
             id: "block-credentials".into(),
             name: "Block credential exfiltration".into(),
             action: RuleAction::Block,
-            condition: RuleCondition::BodyRegex(r"(?i)(aws_secret|api_key|private_key)\s*[:=]".into()),
+            condition: RuleCondition::BodyRegex(
+                r"(?i)(aws_secret|api_key|private_key)\s*[:=]".into(),
+            ),
             enabled: true,
         },
         SecurityRule {
             id: "alert-sql-injection".into(),
             name: "Alert on SQL injection patterns".into(),
             action: RuleAction::Alert,
-            condition: RuleCondition::BodyRegex(r"(?i)(DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT)".into()),
+            condition: RuleCondition::BodyRegex(
+                r"(?i)(DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT)".into(),
+            ),
             enabled: true,
         },
         SecurityRule {
             id: "block-prompt-injection".into(),
             name: "Block prompt injection attempts".into(),
             action: RuleAction::Block,
-            condition: RuleCondition::BodyRegex(r"(?i)(ignore\s+previous|ignore\s+all\s+instructions|you\s+are\s+now)".into()),
+            condition: RuleCondition::BodyRegex(
+                r"(?i)(ignore\s+previous|ignore\s+all\s+instructions|you\s+are\s+now)".into(),
+            ),
             enabled: true,
         },
     ]

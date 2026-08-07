@@ -12,7 +12,7 @@ pub enum CircuitState {
 struct ProviderState {
     failures: AtomicU32,
     successes: AtomicU32,
-    last_failure: AtomicU64, // epoch millis
+    last_failure: AtomicU64,            // epoch millis
     state: std::sync::atomic::AtomicU8, // 0=Closed, 1=Open, 2=HalfOpen
 }
 
@@ -37,11 +37,14 @@ impl ProviderState {
     }
 
     fn set_state(&self, s: CircuitState) {
-        self.state.store(match s {
-            CircuitState::Closed => 0,
-            CircuitState::Open => 1,
-            CircuitState::HalfOpen => 2,
-        }, Ordering::Relaxed);
+        self.state.store(
+            match s {
+                CircuitState::Closed => 0,
+                CircuitState::Open => 1,
+                CircuitState::HalfOpen => 2,
+            },
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -99,7 +102,11 @@ impl CircuitBreaker {
 
         if failures >= self.failure_threshold {
             entry.set_state(CircuitState::Open);
-            tracing::warn!("Circuit OPEN for provider: {} ({} failures)", provider, failures);
+            tracing::warn!(
+                "Circuit OPEN for provider: {} ({} failures)",
+                provider,
+                failures
+            );
         }
     }
 

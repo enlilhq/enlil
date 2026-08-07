@@ -214,12 +214,19 @@ impl TraceStore {
         let conn = match Connection::open(path) {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!("Failed to open trace DB at '{}': {} — traces will be in-memory only", path, e);
+                tracing::error!(
+                    "Failed to open trace DB at '{}': {} — traces will be in-memory only",
+                    path,
+                    e
+                );
                 return Self::new();
             }
         };
         if let Err(e) = conn.execute_batch(TRACE_TABLE) {
-            tracing::error!("Failed to create traces table: {} — traces will be in-memory only", e);
+            tracing::error!(
+                "Failed to create traces table: {} — traces will be in-memory only",
+                e
+            );
             return Self::new();
         }
         let store = Self {
@@ -242,7 +249,10 @@ impl TraceStore {
              FROM traces ORDER BY timestamp DESC LIMIT ?1",
         ) {
             Ok(s) => s,
-            Err(e) => { tracing::error!("trace hydrate prepare failed: {}", e); return; }
+            Err(e) => {
+                tracing::error!("trace hydrate prepare failed: {}", e);
+                return;
+            }
         };
         let rows = stmt.query_map(params![TRACE_CAPACITY as i64], |row| {
             let steps_json: String = row.get(9).unwrap_or_default();
@@ -271,7 +281,13 @@ impl TraceStore {
                 replay_method: row.get(20)?,
             })
         });
-        let rows = match rows { Ok(r) => r, Err(e) => { tracing::error!("trace hydrate query failed: {}", e); return; } };
+        let rows = match rows {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("trace hydrate query failed: {}", e);
+                return;
+            }
+        };
         // Rows come newest-first; reverse so insertion order matches record() (newest last).
         let mut loaded: Vec<Trace> = rows.filter_map(|r| r.ok()).collect();
         loaded.reverse();
@@ -331,7 +347,13 @@ impl TraceStore {
     }
 
     /// Enrich a recorded trace with token/cost/response-hash once the body is processed.
-    pub fn enrich_usage(&self, trace_id: &str, total_tokens: u32, cost_microdollars: u64, response_hash: Option<String>) {
+    pub fn enrich_usage(
+        &self,
+        trace_id: &str,
+        total_tokens: u32,
+        cost_microdollars: u64,
+        response_hash: Option<String>,
+    ) {
         if let Some(mut t) = self.traces.get_mut(trace_id) {
             t.total_tokens = total_tokens;
             t.cost_microdollars = cost_microdollars;
@@ -342,7 +364,12 @@ impl TraceStore {
     }
 
     /// Fetch a full trace, enforcing tenant scope unless super-admin.
-    pub fn get_scoped(&self, trace_id: &str, caller_tenant: &str, super_admin: bool) -> Option<Trace> {
+    pub fn get_scoped(
+        &self,
+        trace_id: &str,
+        caller_tenant: &str,
+        super_admin: bool,
+    ) -> Option<Trace> {
         let t = self.traces.get(trace_id)?;
         if super_admin || t.tenant_id == caller_tenant {
             Some(t.clone())
@@ -394,8 +421,12 @@ impl TraceBackend {
     pub async fn from_env() -> Self {
         #[cfg(feature = "lambda")]
         {
-            if std::env::var("TRACE_BACKEND").map(|v| v.eq_ignore_ascii_case("dynamodb")).unwrap_or(false) {
-                let table = std::env::var("TRACE_TABLE").unwrap_or_else(|_| "plumb_traces".to_string());
+            if std::env::var("TRACE_BACKEND")
+                .map(|v| v.eq_ignore_ascii_case("dynamodb"))
+                .unwrap_or(false)
+            {
+                let table =
+                    std::env::var("TRACE_TABLE").unwrap_or_else(|_| "plumb_traces".to_string());
                 tracing::info!("TraceStore backend: DynamoDB (table={})", table);
                 return TraceBackend::Dynamo(dynamo::DynamoTraceStore::new(table).await);
             }
@@ -413,15 +444,31 @@ impl TraceBackend {
         }
     }
 
-    pub async fn enrich_usage(&self, trace_id: &str, total_tokens: u32, cost_microdollars: u64, response_hash: Option<String>) {
+    pub async fn enrich_usage(
+        &self,
+        trace_id: &str,
+        total_tokens: u32,
+        cost_microdollars: u64,
+        response_hash: Option<String>,
+    ) {
         match self {
-            TraceBackend::Sqlite(s) => s.enrich_usage(trace_id, total_tokens, cost_microdollars, response_hash),
+            TraceBackend::Sqlite(s) => {
+                s.enrich_usage(trace_id, total_tokens, cost_microdollars, response_hash)
+            }
             #[cfg(feature = "lambda")]
-            TraceBackend::Dynamo(d) => d.enrich_usage(trace_id, total_tokens, cost_microdollars, response_hash).await,
+            TraceBackend::Dynamo(d) => {
+                d.enrich_usage(trace_id, total_tokens, cost_microdollars, response_hash)
+                    .await
+            }
         }
     }
 
-    pub async fn get_scoped(&self, trace_id: &str, caller_tenant: &str, super_admin: bool) -> Option<Trace> {
+    pub async fn get_scoped(
+        &self,
+        trace_id: &str,
+        caller_tenant: &str,
+        super_admin: bool,
+    ) -> Option<Trace> {
         match self {
             TraceBackend::Sqlite(s) => s.get_scoped(trace_id, caller_tenant, super_admin),
             #[cfg(feature = "lambda")]
@@ -429,7 +476,12 @@ impl TraceBackend {
         }
     }
 
-    pub async fn list(&self, caller_tenant: &str, super_admin: bool, limit: usize) -> Vec<TraceSummary> {
+    pub async fn list(
+        &self,
+        caller_tenant: &str,
+        super_admin: bool,
+        limit: usize,
+    ) -> Vec<TraceSummary> {
         match self {
             TraceBackend::Sqlite(s) => s.list(caller_tenant, super_admin, limit),
             #[cfg(feature = "lambda")]
@@ -454,8 +506,14 @@ mod tests {
 
     fn mk(id: &str, tenant: &str) -> Trace {
         Trace::start(
-            id.into(), tenant.into(), "s".into(), "a".into(),
-            "POST".into(), "/v1/x".into(), "OpenAI".into(), "http://up".into(),
+            id.into(),
+            tenant.into(),
+            "s".into(),
+            "a".into(),
+            "POST".into(),
+            "/v1/x".into(),
+            "OpenAI".into(),
+            "http://up".into(),
         )
     }
 
@@ -466,8 +524,14 @@ mod tests {
         store.record(mk("t2", "other"));
 
         assert!(store.get_scoped("t1", "acme", false).is_some());
-        assert!(store.get_scoped("t1", "other", false).is_none(), "cross-tenant must be denied");
-        assert!(store.get_scoped("t1", "other", true).is_some(), "super-admin sees all");
+        assert!(
+            store.get_scoped("t1", "other", false).is_none(),
+            "cross-tenant must be denied"
+        );
+        assert!(
+            store.get_scoped("t1", "other", true).is_some(),
+            "super-admin sees all"
+        );
 
         let acme = store.list("acme", false, 100);
         assert_eq!(acme.len(), 1);
@@ -498,7 +562,8 @@ mod tests {
 
     #[test]
     fn test_persistence_hydrates_on_reopen() {
-        let path = std::env::temp_dir().join(format!("traces-test-{}.db", uuid::Uuid::new_v4().simple()));
+        let path =
+            std::env::temp_dir().join(format!("traces-test-{}.db", uuid::Uuid::new_v4().simple()));
         let path_str = path.to_str().unwrap();
 
         {
@@ -514,7 +579,9 @@ mod tests {
 
         // Reopen from the same path — the trace should be hydrated into memory.
         let reopened = TraceStore::new_persistent(path_str);
-        let t = reopened.get_scoped("persisted-1", "acme", true).expect("trace should survive restart");
+        let t = reopened
+            .get_scoped("persisted-1", "acme", true)
+            .expect("trace should survive restart");
         assert_eq!(t.status, 200);
         assert_eq!(t.total_tokens, 42);
         assert_eq!(t.cost_microdollars, 100);

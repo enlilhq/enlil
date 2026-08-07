@@ -1,6 +1,6 @@
+use bytes::Bytes;
 use moka::future::Cache;
 use std::time::Duration;
-use bytes::Bytes;
 
 #[derive(Clone)]
 pub struct CachedResponse {
@@ -13,7 +13,11 @@ pub struct CachedResponse {
 impl CachedResponse {
     pub fn new(body: Bytes, content_type: String) -> Self {
         let integrity_hash = blake3::hash(&body).to_hex().to_string();
-        Self { body, content_type, integrity_hash }
+        Self {
+            body,
+            content_type,
+            integrity_hash,
+        }
     }
 
     /// Validates the cached body hasn't been tampered with

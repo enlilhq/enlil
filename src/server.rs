@@ -127,12 +127,7 @@ pub async fn build_oss_app(config: ProxyConfig) -> Router {
     let state = Arc::new(OssState(EnlilState::from_config(config).await));
 
     let api = Router::new()
-        .route(
-            "/",
-            get(|| async {
-                axum::response::Html(UI_HTML)
-            }),
-        )
+        .route("/", get(|| async { axum::response::Html(UI_HTML) }))
         .route(
             "/api",
             get(|| async {

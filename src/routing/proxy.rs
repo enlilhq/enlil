@@ -1,23 +1,23 @@
+use crate::cache::semantic::generate_hash_value;
+use crate::cache::store::CachedResponse;
 use crate::error::AppError;
-use crate::usage::{ProxyEnv, UsageEvent};
 use crate::identity::TenantContext;
+use crate::observability::Trace;
+use crate::routing::protocols::{detect_protocol_value, Protocol};
+use crate::tokens::{calculate_attribution, parse_usage};
+use crate::usage::{ProxyEnv, UsageEvent};
 use axum::{
     body::Body,
     extract::{Request, State},
     response::IntoResponse,
 };
 use bytes::Bytes;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use std::time::Instant;
-use tracing::info;
 use futures_util::StreamExt;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
-use crate::tokens::{calculate_attribution, parse_usage};
-use crate::cache::semantic::generate_hash_value;
-use crate::cache::store::CachedResponse;
-use crate::routing::protocols::{detect_protocol_value, Protocol};
-use crate::observability::Trace;
+use tracing::info;
 
 pub enum StreamMessage {
     Chunk(Bytes),
@@ -30,7 +30,8 @@ pub async fn handle_proxy<E: ProxyEnv>(
     req: Request,
 ) -> Result<impl IntoResponse, AppError> {
     let tenant_ctx = req.extensions().get::<TenantContext>().cloned();
-    let tenant_id = tenant_ctx.as_ref()
+    let tenant_id = tenant_ctx
+        .as_ref()
         .map(|t| t.tenant_id.clone())
         .unwrap_or_else(|| {
             req.headers()
@@ -122,16 +123,22 @@ pub async fn handle_proxy<E: ProxyEnv>(
     let mut parsed = serde_json::from_slice::<serde_json::Value>(&req_bytes).ok();
 
     // Protocol detection
-    let protocol = parsed.as_ref().map(detect_protocol_value).unwrap_or(Protocol::Generic);
+    let protocol = parsed
+        .as_ref()
+        .map(detect_protocol_value)
+        .unwrap_or(Protocol::Generic);
     info!("Detected protocol: {} for {}", protocol, path);
-    state.metrics.record_event("request", &tenant_id, &format!("{} {} [{}]", method, path, protocol));
+    state.metrics.record_event(
+        "request",
+        &tenant_id,
+        &format!("{} {} [{}]", method, path, protocol),
+    );
 
     // Resolve agent identity (header > system prompt fingerprint > "default").
     // Done before the loop-breaker so it is captured in the trace.
-    let agent_id = state.agent_registry.resolve_agent_id(
-        agent_id_header.as_deref(),
-        &req_bytes,
-    );
+    let agent_id = state
+        .agent_registry
+        .resolve_agent_id(agent_id_header.as_deref(), &req_bytes);
 
     // Begin the time-travel trace for this request.
     let mut trace = Trace::start(
@@ -150,14 +157,20 @@ pub async fn handle_proxy<E: ProxyEnv>(
     let anomaly_score = state.anomaly_detector.record(&tenant_id, req_bytes.len());
     if anomaly_score > 3.0 {
         tracing::warn!(tenant_id = %tenant_id, score = anomaly_score, "Traffic anomaly detected");
-        state.metrics.record_event("anomaly", &tenant_id, &format!("Traffic anomaly (z-score {:.1})", anomaly_score));
+        state.metrics.record_event(
+            "anomaly",
+            &tenant_id,
+            &format!("Traffic anomaly (z-score {:.1})", anomaly_score),
+        );
         trace.step(format!("anomaly_score={:.1}", anomaly_score));
     }
 
     // Agent loop-breaker: sever a session stuck re-issuing the same intent before it burns
     // budget. Runs before caching/upstream so runaway loops are stopped regardless of cache.
     if method == axum::http::Method::POST {
-        use crate::engine::loop_breaker::{intent_fingerprint, intent_fingerprint_value, LoopDecision};
+        use crate::engine::loop_breaker::{
+            intent_fingerprint, intent_fingerprint_value, LoopDecision,
+        };
         let fp = match &parsed {
             Some(v) => intent_fingerprint_value(&path, v),
             None => intent_fingerprint(&path, &req_bytes),
@@ -173,13 +186,19 @@ pub async fn handle_proxy<E: ProxyEnv>(
             state.metrics.record_event(
                 "loop_break",
                 &tenant_id,
-                &format!("Agent loop severed: identical request repeated {} times in session", repeats),
+                &format!(
+                    "Agent loop severed: identical request repeated {} times in session",
+                    repeats
+                ),
             );
 
             // Fire webhook alert (best-effort, off the request path).
             let state_clone = state.clone();
             let tid = tenant_id.clone();
-            let msg = format!("Agent loop detected and severed after {} identical requests", repeats);
+            let msg = format!(
+                "Agent loop detected and severed after {} identical requests",
+                repeats
+            );
             tokio::spawn(async move {
                 state_clone.send_alert(&tid, "loop_break", &msg).await;
             });
@@ -210,8 +229,13 @@ pub async fn handle_proxy<E: ProxyEnv>(
             pattern = %alert.pattern,
             "RISK CHAIN ALERT"
         );
-        state.metrics.risk_chain_alerts.fetch_add(1, Ordering::Relaxed);
-        state.metrics.record_event("risk_alert", &tenant_id, &alert.pattern);
+        state
+            .metrics
+            .risk_chain_alerts
+            .fetch_add(1, Ordering::Relaxed);
+        state
+            .metrics
+            .record_event("risk_alert", &tenant_id, &alert.pattern);
         trace.step(format!("risk_alert: {}", alert.pattern));
 
         // Fire webhook alert
@@ -228,8 +252,8 @@ pub async fn handle_proxy<E: ProxyEnv>(
     let mut safefix_note: Option<String> = None;
     if method == axum::http::Method::POST {
         if let Ok(payload_str) = String::from_utf8(req_bytes.to_vec()) {
-            use crate::engine::pii_redact::redact_pii;
             use crate::engine::deobfuscate::deobfuscate_shell;
+            use crate::engine::pii_redact::redact_pii;
 
             let deobfuscated = deobfuscate_shell(&payload_str);
             let mut final_str = deobfuscated;
@@ -238,26 +262,48 @@ pub async fn handle_proxy<E: ProxyEnv>(
             // read `.env` → base64 → POST). Does NOT mutate the forwarded body.
             if let Some(snippet) = crate::engine::deobfuscate::detect_encoded_exfil(&payload_str) {
                 tracing::warn!(tenant_id = %tenant_id, "Encoded exfiltration detected: {}", snippet);
-                state.metrics.risk_chain_alerts.fetch_add(1, Ordering::Relaxed);
-                state.metrics.record_event("encoded_exfil", &tenant_id, &format!("Base64-encoded sensitive content: {}", snippet));
+                state
+                    .metrics
+                    .risk_chain_alerts
+                    .fetch_add(1, Ordering::Relaxed);
+                state.metrics.record_event(
+                    "encoded_exfil",
+                    &tenant_id,
+                    &format!("Base64-encoded sensitive content: {}", snippet),
+                );
                 trace.step("encoded_exfil_detected");
                 let state_clone = state.clone();
                 let tid = tenant_id.clone();
                 tokio::spawn(async move {
-                    state_clone.send_alert(&tid, "encoded_exfil", "Base64-encoded sensitive content detected in request").await;
+                    state_clone
+                        .send_alert(
+                            &tid,
+                            "encoded_exfil",
+                            "Base64-encoded sensitive content detected in request",
+                        )
+                        .await;
                 });
             }
 
             if redact_pii(&mut final_str, &state.pii_vault, &tenant_id) {
                 info!("AgentTrust: PII masked for tenant {}", tenant_id);
                 state.metrics.pii_redactions.fetch_add(1, Ordering::Relaxed);
-                state.metrics.record_event("pii_redaction", &tenant_id, "PII detected and masked (reversible)");
+                state.metrics.record_event(
+                    "pii_redaction",
+                    &tenant_id,
+                    "PII detected and masked (reversible)",
+                );
                 trace.step("pii_redacted");
                 req_bytes = Bytes::from(final_str.clone());
                 body_mutated = true;
             } else if final_str != payload_str {
-                info!("AgentTrust: Shell deobfuscation applied for tenant {}", tenant_id);
-                state.metrics.record_event("deobfuscation", &tenant_id, "Shell hex decoded");
+                info!(
+                    "AgentTrust: Shell deobfuscation applied for tenant {}",
+                    tenant_id
+                );
+                state
+                    .metrics
+                    .record_event("deobfuscation", &tenant_id, "Shell hex decoded");
                 trace.step("shell_deobfuscated");
                 req_bytes = Bytes::from(final_str.clone());
                 body_mutated = true;
@@ -270,17 +316,31 @@ pub async fn handle_proxy<E: ProxyEnv>(
                     info!("SafeFix [{}]: {} → {}", s.severity, s.original, s.suggested);
                 }
                 trace.step(format!("safefix: {} suggestion(s)", suggestions.len()));
-                state.metrics.record_event("safefix", &tenant_id,
-                    &format!("{} suggestion(s): {}", suggestions.len(), suggestions[0].reason));
+                state.metrics.record_event(
+                    "safefix",
+                    &tenant_id,
+                    &format!(
+                        "{} suggestion(s): {}",
+                        suggestions.len(),
+                        suggestions[0].reason
+                    ),
+                );
 
                 // Surface the top suggestion back to the calling agent via a response header
                 // (header-safe ASCII). We advise rather than silently rewrite the request.
                 let top = &suggestions[0];
                 let raw = format!(
                     "{} suggestion(s); top[{}]: {} => {}",
-                    suggestions.len(), top.severity, top.original, top.suggested
+                    suggestions.len(),
+                    top.severity,
+                    top.original,
+                    top.suggested
                 );
-                let clean: String = raw.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(200).collect();
+                let clean: String = raw
+                    .chars()
+                    .filter(|c| c.is_ascii_graphic() || *c == ' ')
+                    .take(200)
+                    .collect();
                 safefix_note = Some(clean);
             }
         }
@@ -302,8 +362,13 @@ pub async fn handle_proxy<E: ProxyEnv>(
         match verdict.action {
             GuardAction::Block => {
                 tracing::warn!(tenant_id = %tenant_id, score = verdict.score, "PROMPT-INJECTION BLOCKED: {}", verdict.summary());
-                state.metrics.injection_blocks.fetch_add(1, Ordering::Relaxed);
-                state.metrics.record_event("prompt_injection", &tenant_id, &verdict.summary());
+                state
+                    .metrics
+                    .injection_blocks
+                    .fetch_add(1, Ordering::Relaxed);
+                state
+                    .metrics
+                    .record_event("prompt_injection", &tenant_id, &verdict.summary());
                 let state_clone = state.clone();
                 let tid = tenant_id.clone();
                 let msg = verdict.summary();
@@ -320,13 +385,18 @@ pub async fn handle_proxy<E: ProxyEnv>(
 
                 return Err(AppError::InjectionBlocked(format!(
                     "Request blocked by prompt-injection defense (score {}): {}",
-                    verdict.score, verdict.summary()
+                    verdict.score,
+                    verdict.summary()
                 )));
             }
             GuardAction::Alert => {
                 tracing::warn!(tenant_id = %tenant_id, score = verdict.score, "prompt-injection signal: {}", verdict.summary());
                 state.metrics.rule_alerts.fetch_add(1, Ordering::Relaxed);
-                state.metrics.record_event("prompt_injection_alert", &tenant_id, &verdict.summary());
+                state.metrics.record_event(
+                    "prompt_injection_alert",
+                    &tenant_id,
+                    &verdict.summary(),
+                );
                 trace.step(format!("prompt_injection_alert: {}", verdict.summary()));
             }
             GuardAction::Allow => {}
@@ -338,7 +408,9 @@ pub async fn handle_proxy<E: ProxyEnv>(
         use crate::engine::rules::RuleAction;
         let body_str = String::from_utf8_lossy(&req_bytes);
         let est_tokens = (req_bytes.len() / 4) as u32;
-        let matches = state.rule_engine.evaluate(&body_str, &tenant_id, est_tokens);
+        let matches = state
+            .rule_engine
+            .evaluate(&body_str, &tenant_id, est_tokens);
         let mut block: Option<(String, String)> = None; // (rule_id, rule_name)
         for m in &matches {
             match &m.action {
@@ -347,7 +419,11 @@ pub async fn handle_proxy<E: ProxyEnv>(
                 }
                 RuleAction::Alert => {
                     state.metrics.rule_alerts.fetch_add(1, Ordering::Relaxed);
-                    state.metrics.record_event("policy_alert", &tenant_id, &format!("Rule '{}' matched", m.rule_name));
+                    state.metrics.record_event(
+                        "policy_alert",
+                        &tenant_id,
+                        &format!("Rule '{}' matched", m.rule_name),
+                    );
                     trace.step(format!("policy_alert: {}", m.rule_id));
                     let state_clone = state.clone();
                     let tid = tenant_id.clone();
@@ -357,11 +433,18 @@ pub async fn handle_proxy<E: ProxyEnv>(
                     });
                 }
                 RuleAction::Redact => {
-                    state.metrics.record_event("policy_redact", &tenant_id, &format!("Rule '{}' flagged content for redaction", m.rule_name));
+                    state.metrics.record_event(
+                        "policy_redact",
+                        &tenant_id,
+                        &format!("Rule '{}' flagged content for redaction", m.rule_name),
+                    );
                     trace.step(format!("policy_redact: {}", m.rule_id));
                 }
                 RuleAction::Log => {
-                    info!("Policy rule '{}' matched for tenant {}", m.rule_name, tenant_id);
+                    info!(
+                        "Policy rule '{}' matched for tenant {}",
+                        m.rule_name, tenant_id
+                    );
                     trace.step(format!("policy_log: {}", m.rule_id));
                 }
             }
@@ -369,7 +452,11 @@ pub async fn handle_proxy<E: ProxyEnv>(
         if let Some((rule_id, rule_name)) = block {
             tracing::warn!(tenant_id = %tenant_id, rule = %rule_id, "POLICY BLOCK");
             state.metrics.policy_blocks.fetch_add(1, Ordering::Relaxed);
-            state.metrics.record_event("policy_block", &tenant_id, &format!("Blocked by rule '{}'", rule_name));
+            state.metrics.record_event(
+                "policy_block",
+                &tenant_id,
+                &format!("Blocked by rule '{}'", rule_name),
+            );
             let state_clone = state.clone();
             let tid = tenant_id.clone();
             let msg = format!("Request blocked by policy rule '{}'", rule_name);
@@ -385,7 +472,8 @@ pub async fn handle_proxy<E: ProxyEnv>(
             state.trace_store.record(trace).await;
 
             return Err(AppError::PolicyBlocked(format!(
-                "Request blocked by policy rule '{}' ({})", rule_name, rule_id
+                "Request blocked by policy rule '{}' ({})",
+                rule_name, rule_id
             )));
         }
     }
@@ -398,10 +486,28 @@ pub async fn handle_proxy<E: ProxyEnv>(
     };
 
     // Context window overflow protection
-    if let Some((estimated, model, limit)) = parsed.as_ref().and_then(crate::engine::context_window::check_context_overflow_value) {
-        tracing::warn!("Context overflow: {} est. tokens > {} limit for model {}", estimated, limit, model);
-        state.metrics.record_event("context_overflow", &tenant_id, &format!("Blocked: ~{} tokens > {} limit ({})", estimated, limit, model));
-        trace.step(format!("context_overflow: ~{} > {} ({})", estimated, limit, model));
+    if let Some((estimated, model, limit)) = parsed
+        .as_ref()
+        .and_then(crate::engine::context_window::check_context_overflow_value)
+    {
+        tracing::warn!(
+            "Context overflow: {} est. tokens > {} limit for model {}",
+            estimated,
+            limit,
+            model
+        );
+        state.metrics.record_event(
+            "context_overflow",
+            &tenant_id,
+            &format!(
+                "Blocked: ~{} tokens > {} limit ({})",
+                estimated, limit, model
+            ),
+        );
+        trace.step(format!(
+            "context_overflow: ~{} > {} ({})",
+            estimated, limit, model
+        ));
         trace.blocked = true;
         trace.block_reason = Some("context_overflow".to_string());
         trace.status = 500;
@@ -413,18 +519,35 @@ pub async fn handle_proxy<E: ProxyEnv>(
         )));
     }
     if method == axum::http::Method::POST {
-        if let Some(hash) = parsed.as_ref().and_then(|v| generate_hash_value(&tenant_id, v)) {
+        if let Some(hash) = parsed
+            .as_ref()
+            .and_then(|v| generate_hash_value(&tenant_id, v))
+        {
             if let Some(cached_res) = state.cache_manager.get(&hash).await {
                 // Cache poisoning prevention: validate integrity
                 if !cached_res.is_valid() {
                     tracing::warn!("Cache integrity check FAILED for hash: {} — evicting", hash);
-                    state.metrics.record_event("cache_poisoning", &tenant_id, "Corrupted cache entry evicted");
-                    state.cache_manager.insert(&hash, CachedResponse::new(Bytes::new(), String::new())).await;
+                    state.metrics.record_event(
+                        "cache_poisoning",
+                        &tenant_id,
+                        "Corrupted cache entry evicted",
+                    );
+                    state
+                        .cache_manager
+                        .insert(&hash, CachedResponse::new(Bytes::new(), String::new()))
+                        .await;
                 } else {
                     info!("Cache HIT for hash: {}", hash);
                     state.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    state.metrics.cache_savings_microdollars.fetch_add(4000, Ordering::Relaxed);
-                    state.metrics.record_event("cache_hit", &tenant_id, "Semantic cache hit — saved LLM call");
+                    state
+                        .metrics
+                        .cache_savings_microdollars
+                        .fetch_add(4000, Ordering::Relaxed);
+                    state.metrics.record_event(
+                        "cache_hit",
+                        &tenant_id,
+                        "Semantic cache hit — saved LLM call",
+                    );
 
                     trace.step("cache_hit");
                     trace.cache = "hit".to_string();
@@ -468,16 +591,25 @@ pub async fn handle_proxy<E: ProxyEnv>(
 
     if !state.circuit_breaker.is_available(&primary_provider) {
         // Primary is down — find a fallback
-        if let Some((name, base)) = fallback_providers.iter()
+        if let Some((name, base)) = fallback_providers
+            .iter()
             .find(|(name, _)| *name != primary_provider && state.circuit_breaker.is_available(name))
         {
-            tracing::warn!("Circuit open for {}, failing over to {}", primary_provider, name);
+            tracing::warn!(
+                "Circuit open for {}, failing over to {}",
+                primary_provider,
+                name
+            );
             effective_uri = if query.is_empty() {
                 format!("{}{}", base, path)
             } else {
                 format!("{}{}?{}", base, path, query)
             };
-            state.metrics.record_event("failover", &tenant_id, &format!("Circuit open: {} → {}", primary_provider, name));
+            state.metrics.record_event(
+                "failover",
+                &tenant_id,
+                &format!("Circuit open: {} → {}", primary_provider, name),
+            );
             trace.step(format!("failover: {} → {}", primary_provider, name));
         }
     }
@@ -499,7 +631,8 @@ pub async fn handle_proxy<E: ProxyEnv>(
         state.circuit_breaker.record_failure(&primary_provider);
         tracing::warn!("Upstream 5xx from {}, attempting retry", effective_uri);
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let retry_res = state.client
+        let retry_res = state
+            .client
             .request(method, &effective_uri)
             .headers(headers)
             .body(req_bytes)
@@ -518,7 +651,9 @@ pub async fn handle_proxy<E: ProxyEnv>(
     };
 
     let is_success = res.status().is_success();
-    let content_type = res.headers().get("content-type")
+    let content_type = res
+        .headers()
+        .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/json")
         .to_string();
@@ -532,7 +667,10 @@ pub async fn handle_proxy<E: ProxyEnv>(
     // For non-streaming responses, collect body upfront for reliable processing
     if !is_streaming {
         let status = res.status();
-        let body_bytes = res.bytes().await.map_err(|e| AppError::Internal(e.to_string()))?;
+        let body_bytes = res
+            .bytes()
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
         trace.status = status.as_u16();
         trace.step(format!("upstream_status={}", status.as_u16()));
@@ -542,10 +680,20 @@ pub async fn handle_proxy<E: ProxyEnv>(
         // Process usage/caching in the same task (no race condition)
         if is_success {
             process_response_body(
-                &body_bytes, &state, &tenant_id, &agent_id, api_key_id,
-                request_hash, &content_type, &path, &protocol.to_string(),
-                tool_tokens_est, memory_tokens_est, &trace_id,
-            ).await;
+                &body_bytes,
+                &state,
+                &tenant_id,
+                &agent_id,
+                api_key_id,
+                request_hash,
+                &content_type,
+                &path,
+                &protocol.to_string(),
+                tool_tokens_est,
+                memory_tokens_est,
+                &trace_id,
+            )
+            .await;
         }
 
         let axum_res = axum::response::Response::builder()
@@ -581,7 +729,21 @@ pub async fn handle_proxy<E: ProxyEnv>(
     state.trace_store.record(trace).await;
 
     tokio::spawn(async move {
-        process_response_body_streaming(rx, state_clone, tenant_id_clone, agent_id_clone, api_key_id, cacheable_hash, content_type, path_clone, protocol_str, tool_tokens_est, memory_tokens_est, trace_id_clone).await;
+        process_response_body_streaming(
+            rx,
+            state_clone,
+            tenant_id_clone,
+            agent_id_clone,
+            api_key_id,
+            cacheable_hash,
+            content_type,
+            path_clone,
+            protocol_str,
+            tool_tokens_est,
+            memory_tokens_est,
+            trace_id_clone,
+        )
+        .await;
     });
 
     let response_stream = async_stream::stream! {
@@ -604,8 +766,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
         }
     };
 
-    let axum_res = response_builder
-        .header("x-trace-id", &trace_id);
+    let axum_res = response_builder.header("x-trace-id", &trace_id);
     let axum_res = match &safefix_note {
         Some(note) => axum_res.header("x-agent-safefix", note),
         None => axum_res,
@@ -635,7 +796,10 @@ async fn process_response_body<E: ProxyEnv>(
 ) {
     // Capture a response fingerprint for deterministic replay diffing.
     let response_hash = blake3::hash(body).to_hex().to_string();
-    state.trace_store.enrich_usage(trace_id, 0, 0, Some(response_hash)).await;
+    state
+        .trace_store
+        .enrich_usage(trace_id, 0, 0, Some(response_hash))
+        .await;
 
     if let Some(hash) = request_hash {
         let cached_res = CachedResponse::new(body.clone(), content_type.to_string());
@@ -648,7 +812,8 @@ async fn process_response_body<E: ProxyEnv>(
             if let Some(token_usage) = parse_usage(usage) {
                 if token_usage.total_tokens() > 0 {
                     let provider_usage = token_usage.as_provider_usage();
-                    let attr = calculate_attribution(&provider_usage, tool_tokens_est, memory_tokens_est);
+                    let attr =
+                        calculate_attribution(&provider_usage, tool_tokens_est, memory_tokens_est);
 
                     info!(
                         tenant_id = %tenant_id,
@@ -659,30 +824,43 @@ async fn process_response_body<E: ProxyEnv>(
                         "4-Layer Token Attribution"
                     );
 
-                    let model = json_body.get("model").and_then(|m| m.as_str()).unwrap_or("gpt-4o");
+                    let model = json_body
+                        .get("model")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("gpt-4o");
                     let total_tokens = token_usage.total_tokens();
-                    state.metrics.total_tokens_used.fetch_add(total_tokens as u64, Ordering::Relaxed);
+                    state
+                        .metrics
+                        .total_tokens_used
+                        .fetch_add(total_tokens as u64, Ordering::Relaxed);
 
                     // Track per-agent usage (cache-aware cost)
                     let cost_micro = crate::tokens::calculate_cost_detailed(model, &token_usage);
-                    state.agent_registry.record(tenant_id, agent_id, total_tokens, cost_micro);
-                    state.trace_store.enrich_usage(trace_id, total_tokens, cost_micro, None).await;
+                    state
+                        .agent_registry
+                        .record(tenant_id, agent_id, total_tokens, cost_micro);
+                    state
+                        .trace_store
+                        .enrich_usage(trace_id, total_tokens, cost_micro, None)
+                        .await;
 
                     // Billing, quotas, shared cross-instance counters and the usage log
                     // are cloud concerns — routed through the ProxyEnv hook so the OSS
                     // build needs no cost_tracker / quota_manager / redis / db.
-                    state.record_usage(UsageEvent {
-                        tenant_id: tenant_id.to_string(),
-                        api_key_id,
-                        model: model.to_string(),
-                        usage: token_usage.clone(),
-                        cost_micro,
-                        total_tokens,
-                        prompt_tokens: provider_usage.prompt_tokens,
-                        completion_tokens: provider_usage.completion_tokens,
-                        protocol: protocol.to_string(),
-                        path: path.to_string(),
-                    }).await;
+                    state
+                        .record_usage(UsageEvent {
+                            tenant_id: tenant_id.to_string(),
+                            api_key_id,
+                            model: model.to_string(),
+                            usage: token_usage.clone(),
+                            cost_micro,
+                            total_tokens,
+                            prompt_tokens: provider_usage.prompt_tokens,
+                            completion_tokens: provider_usage.completion_tokens,
+                            protocol: protocol.to_string(),
+                            path: path.to_string(),
+                        })
+                        .await;
                 }
             }
         }
@@ -711,16 +889,24 @@ async fn process_response_body_streaming<E: ProxyEnv>(
     while let Some(msg) = rx.recv().await {
         match msg {
             StreamMessage::Chunk(chunk) => full_body.extend_from_slice(&chunk),
-            StreamMessage::Done => { stream_success = true; break; }
+            StreamMessage::Done => {
+                stream_success = true;
+                break;
+            }
             StreamMessage::Error => break,
         }
     }
 
-    if !stream_success { return; }
+    if !stream_success {
+        return;
+    }
 
     // Capture a response fingerprint for deterministic replay diffing.
     let response_hash = blake3::hash(&full_body).to_hex().to_string();
-    state.trace_store.enrich_usage(&trace_id, 0, 0, Some(response_hash)).await;
+    state
+        .trace_store
+        .enrich_usage(&trace_id, 0, 0, Some(response_hash))
+        .await;
 
     if let Some(hash) = request_hash {
         let cached_res = CachedResponse::new(Bytes::from(full_body.clone()), content_type.clone());
@@ -735,7 +921,10 @@ async fn process_response_body_streaming<E: ProxyEnv>(
             if line.starts_with("data: ") && line != "data: [DONE]" {
                 if let Ok(json_body) = serde_json::from_str::<serde_json::Value>(&line[6..]) {
                     if let Some(usage) = json_body.get("usage") {
-                        if !usage.is_null() { usage_value = Some(usage.clone()); break; }
+                        if !usage.is_null() {
+                            usage_value = Some(usage.clone());
+                            break;
+                        }
                     }
                 }
             }
@@ -748,7 +937,8 @@ async fn process_response_body_streaming<E: ProxyEnv>(
         if let Some(token_usage) = parse_usage(&usage) {
             if token_usage.total_tokens() > 0 {
                 let provider_usage = token_usage.as_provider_usage();
-                let attr = calculate_attribution(&provider_usage, tool_tokens_est, memory_tokens_est);
+                let attr =
+                    calculate_attribution(&provider_usage, tool_tokens_est, memory_tokens_est);
 
                 info!(
                     tenant_id = %tenant_id,
@@ -763,7 +953,8 @@ async fn process_response_body_streaming<E: ProxyEnv>(
 
                 // Extract model name from response body
                 let model = if content_type.contains("text/event-stream") {
-                    body_str.lines()
+                    body_str
+                        .lines()
                         .find(|l| l.starts_with("data: ") && *l != "data: [DONE]")
                         .and_then(|l| serde_json::from_str::<serde_json::Value>(&l[6..]).ok())
                         .and_then(|j| j.get("model").and_then(|m| m.as_str().map(String::from)))
@@ -776,36 +967,53 @@ async fn process_response_body_streaming<E: ProxyEnv>(
                 };
 
                 let total_tokens = token_usage.total_tokens();
-                state.metrics.total_tokens_used.fetch_add(total_tokens as u64, Ordering::Relaxed);
+                state
+                    .metrics
+                    .total_tokens_used
+                    .fetch_add(total_tokens as u64, Ordering::Relaxed);
 
                 // Track per-agent usage (cache-aware cost)
                 let cost_micro = crate::tokens::calculate_cost_detailed(&model, &token_usage);
-                state.agent_registry.record(&tenant_id, &agent_id, total_tokens, cost_micro);
-                state.trace_store.enrich_usage(&trace_id, total_tokens, cost_micro, None).await;
+                state
+                    .agent_registry
+                    .record(&tenant_id, &agent_id, total_tokens, cost_micro);
+                state
+                    .trace_store
+                    .enrich_usage(&trace_id, total_tokens, cost_micro, None)
+                    .await;
 
                 // Cloud accounting via the ProxyEnv hook (no-op in the OSS build).
-                state.record_usage(UsageEvent {
-                    tenant_id: tenant_id.clone(),
-                    api_key_id,
-                    model: model.clone(),
-                    usage: token_usage.clone(),
-                    cost_micro,
-                    total_tokens,
-                    prompt_tokens: provider_usage.prompt_tokens,
-                    completion_tokens: provider_usage.completion_tokens,
-                    protocol: protocol.clone(),
-                    path: path.clone(),
-                }).await;
+                state
+                    .record_usage(UsageEvent {
+                        tenant_id: tenant_id.clone(),
+                        api_key_id,
+                        model: model.clone(),
+                        usage: token_usage.clone(),
+                        cost_micro,
+                        total_tokens,
+                        prompt_tokens: provider_usage.prompt_tokens,
+                        completion_tokens: provider_usage.completion_tokens,
+                        protocol: protocol.clone(),
+                        path: path.clone(),
+                    })
+                    .await;
             }
         }
     }
 }
 
 fn extract_provider_name(url: &str) -> String {
-    if url.contains("groq.com") { "groq".into() }
-    else if url.contains("openrouter.ai") { "openrouter".into() }
-    else if url.contains("openai.com") { "openai".into() }
-    else if url.contains("anthropic.com") { "anthropic".into() }
-    else if url.contains("together.xyz") { "together".into() }
-    else { url.split('/').nth(2).unwrap_or("unknown").to_string() }
+    if url.contains("groq.com") {
+        "groq".into()
+    } else if url.contains("openrouter.ai") {
+        "openrouter".into()
+    } else if url.contains("openai.com") {
+        "openai".into()
+    } else if url.contains("anthropic.com") {
+        "anthropic".into()
+    } else if url.contains("together.xyz") {
+        "together".into()
+    } else {
+        url.split('/').nth(2).unwrap_or("unknown").to_string()
+    }
 }

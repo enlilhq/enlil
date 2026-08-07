@@ -42,9 +42,15 @@ impl std::fmt::Debug for ProxyConfig {
             .field("cache_max_capacity", &self.cache_max_capacity)
             .field("max_payload_bytes", &self.max_payload_bytes)
             .field("jwt_secret", &"***REDACTED***")
-            .field("database_url", &self.database_url.as_ref().map(|_| "***REDACTED***"))
+            .field(
+                "database_url",
+                &self.database_url.as_ref().map(|_| "***REDACTED***"),
+            )
             .field("require_auth", &self.require_auth)
-            .field("admin_api_key", &self.admin_api_key.as_ref().map(|_| "***REDACTED***"))
+            .field(
+                "admin_api_key",
+                &self.admin_api_key.as_ref().map(|_| "***REDACTED***"),
+            )
             .finish()
     }
 }
@@ -62,18 +68,38 @@ impl ProxyConfig {
             port: env_or("PORT", "8080").parse().unwrap_or(8080),
             upstream_url: env_or("UPSTREAM_URL", DEFAULT_UPSTREAM),
             upstream_routes: vec![
-                UpstreamRoute { path_prefix: "/v1/".into(), target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"), name: "OpenAI".into() },
-                UpstreamRoute { path_prefix: "/anthropic/".into(), target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"), name: "Anthropic".into() },
-                UpstreamRoute { path_prefix: "/mcp/".into(), target: env_or("MCP_UPSTREAM", "http://localhost:3001"), name: "MCP Server".into() },
+                UpstreamRoute {
+                    path_prefix: "/v1/".into(),
+                    target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"),
+                    name: "OpenAI".into(),
+                },
+                UpstreamRoute {
+                    path_prefix: "/anthropic/".into(),
+                    target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"),
+                    name: "Anthropic".into(),
+                },
+                UpstreamRoute {
+                    path_prefix: "/mcp/".into(),
+                    target: env_or("MCP_UPSTREAM", "http://localhost:3001"),
+                    name: "MCP Server".into(),
+                },
             ],
-            global_token_limit: env_or("GLOBAL_TOKEN_LIMIT", "100000").parse().unwrap_or(100_000),
+            global_token_limit: env_or("GLOBAL_TOKEN_LIMIT", "100000")
+                .parse()
+                .unwrap_or(100_000),
             cache_ttl_secs: env_or("CACHE_TTL_SECS", "900").parse().unwrap_or(900),
-            cache_max_capacity: env_or("CACHE_MAX_CAPACITY", "10000").parse().unwrap_or(10_000),
-            max_payload_bytes: env_or("MAX_PAYLOAD_BYTES", "1048576").parse().unwrap_or(1_048_576),
+            cache_max_capacity: env_or("CACHE_MAX_CAPACITY", "10000")
+                .parse()
+                .unwrap_or(10_000),
+            max_payload_bytes: env_or("MAX_PAYLOAD_BYTES", "1048576")
+                .parse()
+                .unwrap_or(1_048_576),
             jwt_secret: resolve_jwt_secret(),
             database_url: std::env::var("DATABASE_URL").ok(),
             require_auth: env_or("REQUIRE_AUTH", "false").parse().unwrap_or(false),
-            admin_api_key: std::env::var("ADMIN_API_KEY").ok().filter(|s| !s.trim().is_empty()),
+            admin_api_key: std::env::var("ADMIN_API_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
         }
     }
 
@@ -104,14 +130,32 @@ impl ProxyConfig {
             port: env_or("PORT", "8080").parse().unwrap_or(8080),
             upstream_url: env_or("UPSTREAM_URL", DEFAULT_UPSTREAM),
             upstream_routes: vec![
-                UpstreamRoute { path_prefix: "/v1/".into(), target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"), name: "OpenAI".into() },
-                UpstreamRoute { path_prefix: "/anthropic/".into(), target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"), name: "Anthropic".into() },
-                UpstreamRoute { path_prefix: "/mcp/".into(), target: env_or("MCP_UPSTREAM", "http://localhost:3001"), name: "MCP Server".into() },
+                UpstreamRoute {
+                    path_prefix: "/v1/".into(),
+                    target: env_or("OPENAI_UPSTREAM", "https://api.openai.com"),
+                    name: "OpenAI".into(),
+                },
+                UpstreamRoute {
+                    path_prefix: "/anthropic/".into(),
+                    target: env_or("ANTHROPIC_UPSTREAM", "https://api.anthropic.com"),
+                    name: "Anthropic".into(),
+                },
+                UpstreamRoute {
+                    path_prefix: "/mcp/".into(),
+                    target: env_or("MCP_UPSTREAM", "http://localhost:3001"),
+                    name: "MCP Server".into(),
+                },
             ],
-            global_token_limit: env_or("GLOBAL_TOKEN_LIMIT", "100000").parse().unwrap_or(100_000),
+            global_token_limit: env_or("GLOBAL_TOKEN_LIMIT", "100000")
+                .parse()
+                .unwrap_or(100_000),
             cache_ttl_secs: env_or("CACHE_TTL_SECS", "900").parse().unwrap_or(900),
-            cache_max_capacity: env_or("CACHE_MAX_CAPACITY", "10000").parse().unwrap_or(10_000),
-            max_payload_bytes: env_or("MAX_PAYLOAD_BYTES", "1048576").parse().unwrap_or(1_048_576),
+            cache_max_capacity: env_or("CACHE_MAX_CAPACITY", "10000")
+                .parse()
+                .unwrap_or(10_000),
+            max_payload_bytes: env_or("MAX_PAYLOAD_BYTES", "1048576")
+                .parse()
+                .unwrap_or(1_048_576),
             jwt_secret: String::new(),
             database_url: None,
             require_auth: false,

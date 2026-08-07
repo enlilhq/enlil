@@ -67,12 +67,16 @@ pub enum A2ATaskState {
 /// Extract A2A method from JSON-RPC request
 pub fn extract_a2a_method(body: &[u8]) -> Option<String> {
     let json: Value = serde_json::from_slice(body).ok()?;
-    json.get("method").and_then(|m| m.as_str()).map(String::from)
+    json.get("method")
+        .and_then(|m| m.as_str())
+        .map(String::from)
 }
 
 /// Validate A2A agent card structure
 pub fn validate_agent_card(body: &[u8]) -> bool {
-    let Ok(json) = serde_json::from_slice::<Value>(body) else { return false };
+    let Ok(json) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
     // Agent card must have name, description, and capabilities
     json.get("name").is_some() && json.get("capabilities").is_some()
 }

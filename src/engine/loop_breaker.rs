@@ -83,7 +83,10 @@ impl LoopBreaker {
         // Drop samples outside the sliding window.
         samples.retain(|(_, t)| now.duration_since(*t) < self.window);
 
-        let prior_repeats = samples.iter().filter(|(h, _)| *h == intent_fingerprint).count();
+        let prior_repeats = samples
+            .iter()
+            .filter(|(h, _)| *h == intent_fingerprint)
+            .count();
 
         samples.push((intent_fingerprint, now));
         if samples.len() > MAX_SAMPLES_PER_SESSION {
@@ -92,7 +95,9 @@ impl LoopBreaker {
         }
 
         if prior_repeats >= self.max_repeats {
-            LoopDecision::Break { repeats: prior_repeats + 1 }
+            LoopDecision::Break {
+                repeats: prior_repeats + 1,
+            }
         } else {
             LoopDecision::Allow
         }
@@ -173,15 +178,26 @@ mod tests {
     #[test]
     fn test_fingerprint_stable_and_intent_aware() {
         // Same messages but different temperature → same fingerprint (intent-based).
-        let a = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.1}"#;
-        let b = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.9}"#;
-        assert_eq!(intent_fingerprint("/v1/chat", a), intent_fingerprint("/v1/chat", b));
+        let a =
+            br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.1}"#;
+        let b =
+            br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.9}"#;
+        assert_eq!(
+            intent_fingerprint("/v1/chat", a),
+            intent_fingerprint("/v1/chat", b)
+        );
 
         // Different content → different fingerprint.
         let c = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"bye"}]}"#;
-        assert_ne!(intent_fingerprint("/v1/chat", a), intent_fingerprint("/v1/chat", c));
+        assert_ne!(
+            intent_fingerprint("/v1/chat", a),
+            intent_fingerprint("/v1/chat", c)
+        );
 
         // Same body, different path → different fingerprint.
-        assert_ne!(intent_fingerprint("/v1/chat", a), intent_fingerprint("/v2/chat", a));
+        assert_ne!(
+            intent_fingerprint("/v1/chat", a),
+            intent_fingerprint("/v2/chat", a)
+        );
     }
 }

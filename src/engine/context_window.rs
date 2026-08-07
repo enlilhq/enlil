@@ -29,10 +29,12 @@ pub fn check_context_overflow_value(json: &serde_json::Value) -> Option<(u32, St
     let limit = get_model_context_limit(&model);
 
     // Estimate total input tokens from messages + tools
-    let messages_chars = json.get("messages")
+    let messages_chars = json
+        .get("messages")
         .map(|v| v.to_string().len())
         .unwrap_or(0);
-    let tools_chars = json.get("tools")
+    let tools_chars = json
+        .get("tools")
         .or_else(|| json.get("functions"))
         .map(|v| v.to_string().len())
         .unwrap_or(0);

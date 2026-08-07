@@ -91,12 +91,19 @@ Vendor-neutral by design. Your agents will not all be on one model or one framew
 
 ## Performance
 
-Governance is on the critical path, so its cost is measured, not asserted. A deterministic micro-benchmark (`tests/proxy_overhead_bench.rs`) measures the synchronous per-request governance work and **gates regressions in CI**:
+Governance is on the critical path, so its cost is measured, not asserted. A deterministic micro-benchmark (`tests/proxy_overhead_bench.rs`) measures the synchronous per-request governance work — 5000 iterations, pure CPU, no network, release build — and **gates regressions in CI**:
 
 | | Per-request CPU overhead |
 |---|---|
-| median | **~30µs** |
-| p99 | **~55µs** |
+| median (p50) | **18µs** |
+| p95 | **18µs** |
+| p99 | **28µs** |
+
+Those are the numbers from the CI run on a GitHub-hosted runner, so you can verify them in the Actions log rather than taking our word for it. Your hardware will differ; re-run it yourself with:
+
+```bash
+cargo test --release --test proxy_overhead_bench -- --nocapture
+```
 
 Rust, Tokio, Axum — no GC pauses on the hot path. The request body is parsed **once** and the parsed value shared across every analyzer (protocol detection, loop-breaker, RiskChain, prompt guard, token estimate, context-window guard, cache hash).
 

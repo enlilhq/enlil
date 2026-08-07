@@ -1,3 +1,4 @@
+use crate::usage::ProxyEnv;
 use axum::{
     extract::State,
     http::{Request, StatusCode},
@@ -7,7 +8,6 @@ use axum::{
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use crate::usage::ProxyEnv;
 
 pub struct MetricsCollector {
     pub total_requests: AtomicU64,
@@ -94,7 +94,9 @@ impl MetricsCollector {
 
     pub fn avg_latency_us(&self) -> u64 {
         let total = self.total_requests.load(Ordering::Relaxed);
-        if total == 0 { return 0; }
+        if total == 0 {
+            return 0;
+        }
         self.latency_sum_us.load(Ordering::Relaxed) / total
     }
 
@@ -111,7 +113,8 @@ impl MetricsCollector {
         };
         let mut ts = self.time_series.lock().unwrap();
         ts.push(point);
-        if ts.len() > 360 { // keep ~1 hour at 10s intervals
+        if ts.len() > 360 {
+            // keep ~1 hour at 10s intervals
             let drain_to = ts.len() - 360;
             ts.drain(0..drain_to);
         }
@@ -135,8 +138,14 @@ pub async fn telemetry_middleware<E: ProxyEnv>(
 
     let elapsed_us = start.elapsed().as_micros() as u64;
     state.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
-    state.metrics.latency_sum_us.fetch_add(elapsed_us, Ordering::Relaxed);
-    state.metrics.latency_max_us.fetch_max(elapsed_us, Ordering::Relaxed);
+    state
+        .metrics
+        .latency_sum_us
+        .fetch_add(elapsed_us, Ordering::Relaxed);
+    state
+        .metrics
+        .latency_max_us
+        .fetch_max(elapsed_us, Ordering::Relaxed);
 
     tracing::info!(
         method = %method,

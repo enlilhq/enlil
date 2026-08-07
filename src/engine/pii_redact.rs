@@ -1,15 +1,17 @@
+use dashmap::DashMap;
 use lazy_static::lazy_static;
 use regex::Regex;
-use dashmap::DashMap;
 use serde::Serialize;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 lazy_static! {
     static ref SSN_REGEX: Regex = Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap();
-    static ref EMAIL_REGEX: Regex = Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b").unwrap();
+    static ref EMAIL_REGEX: Regex =
+        Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b").unwrap();
     static ref CC_REGEX: Regex = Regex::new(r"\b(?:\d[ -]*?){13,16}\b").unwrap();
-    static ref PHONE_REGEX: Regex = Regex::new(r"\b\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b").unwrap();
+    static ref PHONE_REGEX: Regex =
+        Regex::new(r"\b\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b").unwrap();
 }
 
 static TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -81,7 +83,10 @@ impl Default for PiiVault {
 
 impl PiiVault {
     pub fn new() -> Self {
-        Self { vault: DashMap::new(), audit: Mutex::new(Vec::new()) }
+        Self {
+            vault: DashMap::new(),
+            audit: Mutex::new(Vec::new()),
+        }
     }
 
     /// Low-level, unaudited reveal. Prefer [`PiiVault::reveal_for`] for access-controlled paths.
@@ -107,7 +112,13 @@ impl PiiVault {
             }
             Some(entry) => {
                 if !super_admin && entry.tenant_id != caller_tenant {
-                    self.record_audit(actor, "reveal_denied", token, &entry.tenant_id, &entry.pii_type);
+                    self.record_audit(
+                        actor,
+                        "reveal_denied",
+                        token,
+                        &entry.tenant_id,
+                        &entry.pii_type,
+                    );
                     RevealResult::Forbidden
                 } else {
                     self.record_audit(actor, "reveal", token, &entry.tenant_id, &entry.pii_type);
@@ -132,7 +143,12 @@ impl PiiVault {
     }
 
     /// Return recent audit events, scoped to the caller's tenant unless super-admin.
-    pub fn get_audit(&self, caller_tenant: &str, super_admin: bool, limit: usize) -> Vec<AuditEvent> {
+    pub fn get_audit(
+        &self,
+        caller_tenant: &str,
+        super_admin: bool,
+        limit: usize,
+    ) -> Vec<AuditEvent> {
         let audit = self.audit.lock().unwrap();
         audit
             .iter()
@@ -143,7 +159,14 @@ impl PiiVault {
             .collect()
     }
 
-    fn record_audit(&self, actor: &str, action: &str, token: &str, tenant_id: &str, pii_type: &str) {
+    fn record_audit(
+        &self,
+        actor: &str,
+        action: &str,
+        token: &str,
+        tenant_id: &str,
+        pii_type: &str,
+    ) {
         let event = AuditEvent {
             timestamp: now_secs(),
             actor: actor.to_string(),
@@ -164,12 +187,15 @@ impl PiiVault {
     fn store(&self, original: &str, pii_type: &str, tenant_id: &str) -> String {
         let id = TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed);
         let token = format!("PII_{}_{:04}", pii_type, id);
-        self.vault.insert(token.clone(), PiiEntry {
-            original: original.to_string(),
-            pii_type: pii_type.to_string(),
-            tenant_id: tenant_id.to_string(),
-            created_at: now_secs(),
-        });
+        self.vault.insert(
+            token.clone(),
+            PiiEntry {
+                original: original.to_string(),
+                pii_type: pii_type.to_string(),
+                tenant_id: tenant_id.to_string(),
+                created_at: now_secs(),
+            },
+        );
         token
     }
 }
@@ -180,7 +206,10 @@ pub fn redact_pii(text: &mut String, vault: &PiiVault, tenant_id: &str) -> bool 
     let mut modified = false;
 
     // SSN
-    let matches: Vec<String> = SSN_REGEX.find_iter(text).map(|m| m.as_str().to_string()).collect();
+    let matches: Vec<String> = SSN_REGEX
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in matches {
         let token = vault.store(&m, "SSN", tenant_id);
         *text = text.replace(&m, &format!("[{}]", token));
@@ -188,7 +217,10 @@ pub fn redact_pii(text: &mut String, vault: &PiiVault, tenant_id: &str) -> bool 
     }
 
     // Email
-    let matches: Vec<String> = EMAIL_REGEX.find_iter(text).map(|m| m.as_str().to_string()).collect();
+    let matches: Vec<String> = EMAIL_REGEX
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in matches {
         let token = vault.store(&m, "EMAIL", tenant_id);
         *text = text.replace(&m, &format!("[{}]", token));
@@ -196,7 +228,10 @@ pub fn redact_pii(text: &mut String, vault: &PiiVault, tenant_id: &str) -> bool 
     }
 
     // Credit Card
-    let matches: Vec<String> = CC_REGEX.find_iter(text).map(|m| m.as_str().to_string()).collect();
+    let matches: Vec<String> = CC_REGEX
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in matches {
         let token = vault.store(&m, "CC", tenant_id);
         *text = text.replace(&m, &format!("[{}]", token));
@@ -204,7 +239,10 @@ pub fn redact_pii(text: &mut String, vault: &PiiVault, tenant_id: &str) -> bool 
     }
 
     // Phone
-    let matches: Vec<String> = PHONE_REGEX.find_iter(text).map(|m| m.as_str().to_string()).collect();
+    let matches: Vec<String> = PHONE_REGEX
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in matches {
         let token = vault.store(&m, "PHONE", tenant_id);
         *text = text.replace(&m, &format!("[{}]", token));
@@ -217,10 +255,26 @@ pub fn redact_pii(text: &mut String, vault: &PiiVault, tenant_id: &str) -> bool 
 /// Legacy API compatibility — strips PII without vault (non-reversible)
 pub fn redact_pii_strip(text: &mut String) -> bool {
     let mut modified = false;
-    if SSN_REGEX.is_match(text) { *text = SSN_REGEX.replace_all(text, "[REDACTED_SSN]").to_string(); modified = true; }
-    if EMAIL_REGEX.is_match(text) { *text = EMAIL_REGEX.replace_all(text, "[REDACTED_EMAIL]").to_string(); modified = true; }
-    if CC_REGEX.is_match(text) { *text = CC_REGEX.replace_all(text, "[REDACTED_CC]").to_string(); modified = true; }
-    if PHONE_REGEX.is_match(text) { *text = PHONE_REGEX.replace_all(text, "[REDACTED_PHONE]").to_string(); modified = true; }
+    if SSN_REGEX.is_match(text) {
+        *text = SSN_REGEX.replace_all(text, "[REDACTED_SSN]").to_string();
+        modified = true;
+    }
+    if EMAIL_REGEX.is_match(text) {
+        *text = EMAIL_REGEX
+            .replace_all(text, "[REDACTED_EMAIL]")
+            .to_string();
+        modified = true;
+    }
+    if CC_REGEX.is_match(text) {
+        *text = CC_REGEX.replace_all(text, "[REDACTED_CC]").to_string();
+        modified = true;
+    }
+    if PHONE_REGEX.is_match(text) {
+        *text = PHONE_REGEX
+            .replace_all(text, "[REDACTED_PHONE]")
+            .to_string();
+        modified = true;
+    }
     modified
 }
 

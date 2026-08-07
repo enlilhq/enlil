@@ -19,8 +19,8 @@ use enlil::engine::pii_redact::{redact_pii, PiiVault};
 use enlil::engine::prompt_guard::PromptGuard;
 use enlil::engine::risk_chain::RiskChain;
 use enlil::engine::rules::RuleEngine;
-use enlil::tokens::estimate_token_layers_value;
 use enlil::routing::protocols::detect_protocol_value;
+use enlil::tokens::estimate_token_layers_value;
 use std::time::Instant;
 
 #[test]
@@ -97,9 +97,16 @@ fn bench_proxy_compute_overhead() {
     let p95 = samples[(iterations as f64 * 0.95) as usize];
     let p99 = samples[(iterations as f64 * 0.99) as usize];
     let avg = samples.iter().sum::<u64>() / iterations as u64;
-    let mode = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let mode = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
 
-    println!("\n=== PROXY COMPUTE OVERHEAD ({} iters, pure CPU, no network, {} build) ===", iterations, mode);
+    println!(
+        "\n=== PROXY COMPUTE OVERHEAD ({} iters, pure CPU, no network, {} build) ===",
+        iterations, mode
+    );
     println!("  avg: {:.2}µs", avg as f64 / 1000.0);
     println!("  p50: {:.2}µs", p50 as f64 / 1000.0);
     println!("  p95: {:.2}µs", p95 as f64 / 1000.0);
@@ -111,7 +118,11 @@ fn bench_proxy_compute_overhead() {
         // Debug builds run regex/serde ~10-30x slower and aren't representative of the
         // deployed (release) binary. Enforce only a loose sanity bound here; the real
         // budget is enforced in release (run: `cargo test --release`).
-        assert!(p99_us < 3_000.0, "p99 debug compute overhead {:.2}µs is implausibly high", p99_us);
+        assert!(
+            p99_us < 3_000.0,
+            "p99 debug compute overhead {:.2}µs is implausibly high",
+            p99_us
+        );
     } else {
         // Measured reality (release): the full governance pipeline runs ~60µs p50 / ~110µs
         // Measured reality (release, after the parse-once optimization): the full governance
@@ -119,6 +130,10 @@ fn bench_proxy_compute_overhead() {
         // parsed value shared across analyzers (protocol, loop-breaker, RiskChain, prompt
         // guard, token estimate, context window, cache hash). Gate at 120µs p99 (headroom for
         // shared CI runners); tighten on dedicated hardware.
-        assert!(p99_us < 120.0, "p99 proxy compute overhead {:.2}µs exceeds the 120µs regression budget", p99_us);
+        assert!(
+            p99_us < 120.0,
+            "p99 proxy compute overhead {:.2}µs exceeds the 120µs regression budget",
+            p99_us
+        );
     }
 }

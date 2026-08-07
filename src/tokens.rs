@@ -77,7 +77,10 @@ impl TokenUsage {
 pub fn parse_usage(usage: &serde_json::Value) -> Option<TokenUsage> {
     // --- OpenAI shape: prompt_tokens (incl. cached) / completion_tokens ---
     if let Some(prompt) = usage.get("prompt_tokens").and_then(|v| v.as_u64()) {
-        let completion = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let completion = usage
+            .get("completion_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         // cached_tokens is a subset of prompt_tokens.
         let cached = usage
             .get("prompt_tokens_details")
@@ -95,9 +98,18 @@ pub fn parse_usage(usage: &serde_json::Value) -> Option<TokenUsage> {
 
     // --- Anthropic shape: input_tokens (uncached) / output_tokens + cache_* ---
     if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_u64()) {
-        let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_write = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_read = usage
+            .get("cache_read_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write = usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         return Some(TokenUsage {
             uncached_input_tokens: input as u32,
             cached_read_tokens: cache_read as u32,
@@ -120,12 +132,14 @@ pub fn estimate_token_layers(body: &[u8]) -> (u32, u32) {
 
 /// Same as [`estimate_token_layers`] but from an already-parsed JSON value.
 pub fn estimate_token_layers_value(json: &serde_json::Value) -> (u32, u32) {
-    let tool_chars = json.get("tools")
+    let tool_chars = json
+        .get("tools")
         .or_else(|| json.get("functions"))
         .map(|v| v.to_string().len())
         .unwrap_or(0);
 
-    let memory_chars = json.get("messages")
+    let memory_chars = json
+        .get("messages")
         .and_then(|m| m.as_array())
         .map(|msgs| {
             msgs.iter()
@@ -146,7 +160,10 @@ pub fn calculate_attribution(
 ) -> TokenAttribution {
     let tool = estimated_tool_tokens.min(usage.prompt_tokens);
     let memory = estimated_memory_tokens.min(usage.prompt_tokens.saturating_sub(tool));
-    let prompt = usage.prompt_tokens.saturating_sub(tool).saturating_sub(memory);
+    let prompt = usage
+        .prompt_tokens
+        .saturating_sub(tool)
+        .saturating_sub(memory);
 
     TokenAttribution {
         prompt_tokens: prompt,
@@ -284,7 +301,11 @@ mod tests {
 
     #[test]
     fn test_calculate_attribution_with_layers() {
-        let usage = ProviderUsage { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 };
+        let usage = ProviderUsage {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+        };
         let attr = calculate_attribution(&usage, 20, 30);
         assert_eq!(attr.tool_tokens, 20);
         assert_eq!(attr.memory_tokens, 30);

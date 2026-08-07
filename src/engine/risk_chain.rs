@@ -31,7 +31,9 @@ impl Default for RiskChain {
 
 impl RiskChain {
     pub fn new() -> Self {
-        Self { sessions: DashMap::new() }
+        Self {
+            sessions: DashMap::new(),
+        }
     }
 
     /// Extracts an action from a request payload and appends to the session chain.
@@ -75,15 +77,26 @@ fn extract_action_value(json: &Value) -> Action {
     if let Some(tools) = json.get("tools").and_then(|t| t.as_array()) {
         for tool in tools {
             if let Some(name) = tool.pointer("/function/name").and_then(|n| n.as_str()) {
-                let args = tool.pointer("/function/arguments")
+                let args = tool
+                    .pointer("/function/arguments")
                     .and_then(|a| a.as_str())
                     .unwrap_or("");
                 return match name {
-                    n if n.contains("read") || n.contains("cat") => Action::ReadFile(args.to_string()),
-                    n if n.contains("write") || n.contains("save") => Action::WriteFile(args.to_string()),
-                    n if n.contains("exec") || n.contains("shell") || n.contains("bash") => Action::ExecuteShell(args.to_string()),
-                    n if n.contains("http") || n.contains("fetch") || n.contains("curl") => Action::NetworkEgress(args.to_string()),
-                    n if n.contains("sql") || n.contains("query") || n.contains("db") => Action::DatabaseQuery,
+                    n if n.contains("read") || n.contains("cat") => {
+                        Action::ReadFile(args.to_string())
+                    }
+                    n if n.contains("write") || n.contains("save") => {
+                        Action::WriteFile(args.to_string())
+                    }
+                    n if n.contains("exec") || n.contains("shell") || n.contains("bash") => {
+                        Action::ExecuteShell(args.to_string())
+                    }
+                    n if n.contains("http") || n.contains("fetch") || n.contains("curl") => {
+                        Action::NetworkEgress(args.to_string())
+                    }
+                    n if n.contains("sql") || n.contains("query") || n.contains("db") => {
+                        Action::DatabaseQuery
+                    }
                     _ => Action::Unknown,
                 };
             }
@@ -92,7 +105,10 @@ fn extract_action_value(json: &Value) -> Action {
 
     // Check MCP JSON-RPC method
     if let Some(method) = json.get("method").and_then(|m| m.as_str()) {
-        let params = json.get("params").and_then(|p| p.to_string().into()).unwrap_or_default();
+        let params = json
+            .get("params")
+            .and_then(|p| p.to_string().into())
+            .unwrap_or_default();
         return match method {
             m if m.contains("read") => Action::ReadFile(params),
             m if m.contains("write") => Action::WriteFile(params),
@@ -105,18 +121,26 @@ fn extract_action_value(json: &Value) -> Action {
 }
 
 fn check_patterns(session_id: &str, chain: &[Action]) -> Option<RiskAlert> {
-    if chain.len() < 2 { return None; }
+    if chain.len() < 2 {
+        return None;
+    }
 
     let len = chain.len();
     // Pattern 1: ReadFile(.env or secrets) -> NetworkEgress
     for i in 0..len - 1 {
         if let Action::ReadFile(ref path) = chain[i] {
-            if path.contains(".env") || path.contains("secret") || path.contains("passwd") || path.contains("credentials") {
+            if path.contains(".env")
+                || path.contains("secret")
+                || path.contains("passwd")
+                || path.contains("credentials")
+            {
                 for j in (i + 1)..len {
                     if matches!(chain[j], Action::NetworkEgress(_)) {
                         return Some(RiskAlert {
                             session_id: session_id.to_string(),
-                            pattern: "DATA_EXFILTRATION: sensitive file read followed by network egress".to_string(),
+                            pattern:
+                                "DATA_EXFILTRATION: sensitive file read followed by network egress"
+                                    .to_string(),
                             actions: chain.iter().map(|a| format!("{:?}", a)).collect(),
                         });
                     }
@@ -133,7 +157,9 @@ fn check_patterns(session_id: &str, chain: &[Action]) -> Option<RiskAlert> {
                     if path.contains("/etc/passwd") || path.contains("/etc/shadow") {
                         return Some(RiskAlert {
                             session_id: session_id.to_string(),
-                            pattern: "PRIVILEGE_ESCALATION: shell execution followed by system file read".to_string(),
+                            pattern:
+                                "PRIVILEGE_ESCALATION: shell execution followed by system file read"
+                                    .to_string(),
                             actions: chain.iter().map(|a| format!("{:?}", a)).collect(),
                         });
                     }
@@ -143,7 +169,10 @@ fn check_patterns(session_id: &str, chain: &[Action]) -> Option<RiskAlert> {
     }
 
     // Pattern 3: Multiple rapid shell executions (>3 in chain)
-    let shell_count = chain.iter().filter(|a| matches!(a, Action::ExecuteShell(_))).count();
+    let shell_count = chain
+        .iter()
+        .filter(|a| matches!(a, Action::ExecuteShell(_)))
+        .count();
     if shell_count >= 4 {
         return Some(RiskAlert {
             session_id: session_id.to_string(),

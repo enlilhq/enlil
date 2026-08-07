@@ -64,9 +64,16 @@ fn eval_pii_detection_accuracy() {
     }
 
     let accuracy = correct as f64 / total as f64 * 100.0;
-    println!("PII detection accuracy: {:.1}% ({}/{})", accuracy, correct, total);
+    println!(
+        "PII detection accuracy: {:.1}% ({}/{})",
+        accuracy, correct, total
+    );
     // PRD §6 target: >99% on the adversarial set.
-    assert!(accuracy >= 99.0, "PII accuracy {:.1}% below the 99% target", accuracy);
+    assert!(
+        accuracy >= 99.0,
+        "PII accuracy {:.1}% below the 99% target",
+        accuracy
+    );
 }
 
 #[test]
@@ -82,7 +89,8 @@ fn eval_semantic_cache_hit_rate() {
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gpt-4o",
             "messages": [{"role": "user", "content": format!("question number {}", i % distinct)}]
-        })).unwrap();
+        }))
+        .unwrap();
         let hash = generate_hash("eval-tenant", &body).expect("hashable intent");
         if !seen.insert(hash) {
             hits += 1;
@@ -90,10 +98,21 @@ fn eval_semantic_cache_hit_rate() {
     }
 
     let hit_rate = hits as f64 / total as f64 * 100.0;
-    println!("Semantic cache hit rate: {:.1}% ({} hits / {})", hit_rate, hits, total);
-    assert_eq!(seen.len(), distinct, "dedup should collapse to exactly the distinct intents");
+    println!(
+        "Semantic cache hit rate: {:.1}% ({} hits / {})",
+        hit_rate, hits, total
+    );
+    assert_eq!(
+        seen.len(),
+        distinct,
+        "dedup should collapse to exactly the distinct intents"
+    );
     // PRD §6 target: intercept 30–40% of redundant queries.
-    assert!(hit_rate >= 30.0, "cache hit rate {:.1}% below the 30% target", hit_rate);
+    assert!(
+        hit_rate >= 30.0,
+        "cache hit rate {:.1}% below the 30% target",
+        hit_rate
+    );
 }
 
 #[test]
@@ -104,12 +123,14 @@ fn eval_cache_ignores_volatile_fields() {
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": "what is 2+2?"}],
         "temperature": 0.1, "max_tokens": 10
-    })).unwrap();
+    }))
+    .unwrap();
     let b = serde_json::to_vec(&serde_json::json!({
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": "what is 2+2?"}],
         "temperature": 0.9, "max_tokens": 500
-    })).unwrap();
+    }))
+    .unwrap();
     assert_eq!(generate_hash("t", &a), generate_hash("t", &b));
 
     // Cross-tenant isolation: identical intent, different tenant → different hash.

@@ -12,9 +12,20 @@ lazy_static! {
 /// Sensitive markers that, if found *inside* a decoded base64 blob, indicate an attempt
 /// to smuggle secrets/commands past plain-text scanners.
 const ENCODED_EXFIL_MARKERS: &[&str] = &[
-    "/etc/passwd", "/etc/shadow", ".env", "id_rsa", "-----begin", "private key",
-    "aws_secret", "secret_key", "secret-key", "api_key", "api-key", "password=",
-    "bearer ", "authorization:",
+    "/etc/passwd",
+    "/etc/shadow",
+    ".env",
+    "id_rsa",
+    "-----begin",
+    "private key",
+    "aws_secret",
+    "secret_key",
+    "secret-key",
+    "api_key",
+    "api-key",
+    "password=",
+    "bearer ",
+    "authorization:",
 ];
 
 /// Normalizes shell commands to expose hidden intent before risk pattern matching.
@@ -24,14 +35,16 @@ pub fn deobfuscate_shell(command: &str) -> String {
 
     // 1. Resolve simple hex escapes
     if HEX_REGEX.is_match(&normalized) {
-        normalized = HEX_REGEX.replace_all(&normalized, |caps: &regex::Captures| {
-            if let Ok(hex_val) = u8::from_str_radix(&caps[1], 16) {
-                if hex_val.is_ascii() {
-                    return (hex_val as char).to_string();
+        normalized = HEX_REGEX
+            .replace_all(&normalized, |caps: &regex::Captures| {
+                if let Ok(hex_val) = u8::from_str_radix(&caps[1], 16) {
+                    if hex_val.is_ascii() {
+                        return (hex_val as char).to_string();
+                    }
                 }
-            }
-            caps[0].to_string()
-        }).to_string();
+                caps[0].to_string()
+            })
+            .to_string();
     }
 
     normalized
@@ -114,7 +127,8 @@ mod tests {
     #[test]
     fn test_benign_base64_not_flagged() {
         // base64 of a harmless sentence — must NOT be flagged.
-        let blob = "anVzdCBhIG5vcm1hbCBoYXJtbGVzcyBzZW50ZW5jZSBhYm91dCB0aGUgd2VhdGhlciB0b2RheSBva2F5";
+        let blob =
+            "anVzdCBhIG5vcm1hbCBoYXJtbGVzcyBzZW50ZW5jZSBhYm91dCB0aGUgd2VhdGhlciB0b2RheSBva2F5";
         assert!(detect_encoded_exfil(blob).is_none());
     }
 

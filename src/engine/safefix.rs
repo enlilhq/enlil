@@ -15,12 +15,15 @@ lazy_static! {
     static ref CHMOD_666: Regex = Regex::new(r"chmod\s+666\s+(\S+)").unwrap();
     static ref RM_RF_ROOT: Regex = Regex::new(r"rm\s+-rf\s+/\s").unwrap();
     static ref RM_RF_STAR: Regex = Regex::new(r"rm\s+-rf\s+\*").unwrap();
-    static ref CURL_PIPE_SH: Regex = Regex::new(r"curl\s+\S+\s*\|\s*(?:sudo\s+)?(?:ba)?sh").unwrap();
+    static ref CURL_PIPE_SH: Regex =
+        Regex::new(r"curl\s+\S+\s*\|\s*(?:sudo\s+)?(?:ba)?sh").unwrap();
     static ref EVAL_EXEC: Regex = Regex::new(r"\b(eval|exec)\s*\(").unwrap();
     static ref SUDO_ALL: Regex = Regex::new(r"echo.*ALL.*NOPASSWD.*sudoers").unwrap();
-    static ref DISABLE_FIREWALL: Regex = Regex::new(r"(?i)(ufw\s+disable|iptables\s+-F|firewall-cmd\s+--.*disable)").unwrap();
+    static ref DISABLE_FIREWALL: Regex =
+        Regex::new(r"(?i)(ufw\s+disable|iptables\s+-F|firewall-cmd\s+--.*disable)").unwrap();
     static ref WILDCARD_CORS: Regex = Regex::new(r#"Access-Control-Allow-Origin.*\*"#).unwrap();
-    static ref HARDCODED_SECRET: Regex = Regex::new(r#"(?i)(password|secret|token)\s*[:=]\s*["'][^"']{8,}["']"#).unwrap();
+    static ref HARDCODED_SECRET: Regex =
+        Regex::new(r#"(?i)(password|secret|token)\s*[:=]\s*["'][^"']{8,}["']"#).unwrap();
 }
 
 /// Scans text for dangerous patterns and returns safer alternatives.
@@ -32,7 +35,9 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
         suggestions.push(SafeFixSuggestion {
             original: caps[0].to_string(),
             suggested: format!("chmod 755 {}", &caps[1]),
-            reason: "777 gives write access to everyone. 755 allows owner write, others read+execute.".into(),
+            reason:
+                "777 gives write access to everyone. 755 allows owner write, others read+execute."
+                    .into(),
             severity: "high",
         });
     }
@@ -41,7 +46,8 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
         suggestions.push(SafeFixSuggestion {
             original: caps[0].to_string(),
             suggested: format!("chmod 644 {}", &caps[1]),
-            reason: "666 gives write access to everyone. 644 allows owner write, others read-only.".into(),
+            reason: "666 gives write access to everyone. 644 allows owner write, others read-only."
+                .into(),
             severity: "high",
         });
     }
@@ -68,7 +74,8 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
         suggestions.push(SafeFixSuggestion {
             original: "curl ... | sh".into(),
             suggested: "curl -o script.sh URL && cat script.sh && sh script.sh".into(),
-            reason: "Piping curl to shell executes untrusted code. Download, inspect, then run.".into(),
+            reason: "Piping curl to shell executes untrusted code. Download, inspect, then run."
+                .into(),
             severity: "high",
         });
     }
@@ -76,7 +83,8 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
     if EVAL_EXEC.is_match(text) {
         suggestions.push(SafeFixSuggestion {
             original: "eval/exec with dynamic input".into(),
-            suggested: "Use a whitelist of allowed commands or subprocess with explicit args".into(),
+            suggested: "Use a whitelist of allowed commands or subprocess with explicit args"
+                .into(),
             reason: "eval/exec with dynamic input enables code injection.".into(),
             severity: "high",
         });
@@ -85,8 +93,10 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
     if SUDO_ALL.is_match(text) {
         suggestions.push(SafeFixSuggestion {
             original: "NOPASSWD ALL in sudoers".into(),
-            suggested: "Grant specific commands: user ALL=(ALL) NOPASSWD: /usr/bin/specific-cmd".into(),
-            reason: "NOPASSWD ALL gives unrestricted root access. Scope to specific commands.".into(),
+            suggested: "Grant specific commands: user ALL=(ALL) NOPASSWD: /usr/bin/specific-cmd"
+                .into(),
+            reason: "NOPASSWD ALL gives unrestricted root access. Scope to specific commands."
+                .into(),
             severity: "critical",
         });
     }
@@ -95,7 +105,8 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
         suggestions.push(SafeFixSuggestion {
             original: "Disable firewall".into(),
             suggested: "Add specific rules: ufw allow 443/tcp (allow only needed ports)".into(),
-            reason: "Disabling the firewall exposes all ports. Add specific allow rules instead.".into(),
+            reason: "Disabling the firewall exposes all ports. Add specific allow rules instead."
+                .into(),
             severity: "critical",
         });
     }
@@ -104,7 +115,8 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
         suggestions.push(SafeFixSuggestion {
             original: "Access-Control-Allow-Origin: *".into(),
             suggested: "Access-Control-Allow-Origin: https://your-domain.com".into(),
-            reason: "Wildcard CORS allows any website to make requests. Specify allowed origins.".into(),
+            reason: "Wildcard CORS allows any website to make requests. Specify allowed origins."
+                .into(),
             severity: "medium",
         });
     }
@@ -112,8 +124,10 @@ pub fn analyze(text: &str) -> Vec<SafeFixSuggestion> {
     if HARDCODED_SECRET.is_match(text) {
         suggestions.push(SafeFixSuggestion {
             original: "Hardcoded secret in code".into(),
-            suggested: "Use environment variables: std::env::var(\"SECRET\") or process.env.SECRET".into(),
-            reason: "Hardcoded secrets get committed to git and leaked. Use env vars or a vault.".into(),
+            suggested: "Use environment variables: std::env::var(\"SECRET\") or process.env.SECRET"
+                .into(),
+            reason: "Hardcoded secrets get committed to git and leaked. Use env vars or a vault."
+                .into(),
             severity: "high",
         });
     }

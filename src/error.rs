@@ -25,36 +25,16 @@ impl IntoResponse for AppError {
                 "upstream_error",
                 format!("Failed to reach upstream provider: {}", e),
             ),
-            AppError::Internal(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                e,
-            ),
-            AppError::Unauthorized(msg) => (
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                msg,
-            ),
-            AppError::RateLimited(msg) => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limited",
-                msg,
-            ),
-            AppError::LoopDetected(msg) => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "agent_loop_detected",
-                msg,
-            ),
-            AppError::PolicyBlocked(msg) => (
-                StatusCode::FORBIDDEN,
-                "policy_blocked",
-                msg,
-            ),
-            AppError::InjectionBlocked(msg) => (
-                StatusCode::FORBIDDEN,
-                "prompt_injection_blocked",
-                msg,
-            ),
+            AppError::Internal(e) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", e),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "unauthorized", msg),
+            AppError::RateLimited(msg) => (StatusCode::TOO_MANY_REQUESTS, "rate_limited", msg),
+            AppError::LoopDetected(msg) => {
+                (StatusCode::TOO_MANY_REQUESTS, "agent_loop_detected", msg)
+            }
+            AppError::PolicyBlocked(msg) => (StatusCode::FORBIDDEN, "policy_blocked", msg),
+            AppError::InjectionBlocked(msg) => {
+                (StatusCode::FORBIDDEN, "prompt_injection_blocked", msg)
+            }
             AppError::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "payload_too_large",

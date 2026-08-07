@@ -11,10 +11,19 @@ cargo install enlil
 enlil
 ```
 
-Point your OpenAI-compatible client at it and open the dashboard:
+Then send your agent's traffic through it. Enlil inspects **any** JSON payload, so this works the same whichever provider or framework you use:
 
 ```python
+# OpenAI / any OpenAI-compatible endpoint (vLLM, Together, Groq, OpenRouter, Ollama)
 client = OpenAI(base_url="http://localhost:8080/v1", api_key="...")
+
+# Anthropic
+client = Anthropic(base_url="http://localhost:8080/anthropic")
+```
+
+```bash
+# MCP servers, A2A agents, or anything else — just point the base URL at Enlil
+export MCP_SERVER_URL=http://localhost:8080/mcp
 ```
 
 ```bash
@@ -22,6 +31,15 @@ open http://localhost:8080   # every action your agents just took
 ```
 
 No signup. No config file. No cloud account. One binary.
+
+### Why it works for any provider
+
+Enlil scans payloads **structurally, not by schema**. It walks every string in the
+request rather than looking for one vendor's field names, so the same injection is
+caught whether it arrives as OpenAI `messages[].content`, an OpenAI multimodal
+`content[].text` array, Anthropic's top-level `system`, Gemini
+`contents[].parts[].text`, an MCP `tools/call` argument, a bare `prompt`, or a
+schema that doesn't exist yet. There are no per-vendor adapters to wait for.
 
 ## What you just got
 
@@ -87,7 +105,9 @@ Vendor-neutral by design. Your agents will not all be on one model or one framew
 - **Circuit breaker** — per-provider failure tracking with failover, including a local Ollama fallback for data sovereignty.
 
 **Protocols**
-- OpenAI HTTP routes, **MCP** (JSON-RPC), and **A2A** payloads are detected natively, so tool calls are governed as first-class actions rather than opaque request bodies.
+- **Any JSON payload is inspected.** Enforcement walks the request structurally, so it does not depend on a provider's schema. OpenAI (including multimodal content arrays), Anthropic, Gemini, MCP `tools/call` arguments, A2A, and unrecognised or future shapes are all scanned.
+- **Protocol detection** additionally labels traffic as OpenAI / MCP (JSON-RPC) / A2A / Generic, so tool calls are traced and governed as first-class actions rather than opaque request bodies.
+- Routing presets ship for OpenAI (`/v1/`), Anthropic (`/anthropic/`), and MCP (`/mcp/`), each overridable by env var.
 
 ## Performance
 

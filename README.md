@@ -89,7 +89,7 @@ Vendor-neutral by design. Your agents will not all be on one model or one framew
 **Control (inline enforcement)**
 - **Prompt-injection & tool-poisoning defense** — scans message content for instruction-override attempts, and MCP/OpenAI *tool descriptions* for hidden imperatives, encoded blobs, and invisible Unicode-tag smuggling. Scores findings; blocks high-confidence attacks.
 - **Declarative policy rules** — block / redact / alert / log rules evaluated per request. Credential exfiltration, SQL injection, and prompt injection ship enabled. `GET /api/rules`.
-- **Agent loop-breaker** — detects a session re-issuing the same request *intent* within a window and hard-stops it before it burns budget.
+- **Agent loop-breaker** — detects a session re-issuing the same request *intent* within a window and hard-stops it before it burns budget. Intent is extracted from `messages` + `tools`, so for OpenAI-shaped payloads volatile fields (`temperature`, a rotating request id) don't defeat detection. For other schemas it falls back to fingerprinting the whole body, which still catches identical repeats but *can* be defeated by a changing nonce or timestamp in the payload. Verified working on Anthropic-, Gemini-, and MCP-shaped requests.
 - **PII redaction (reversible)** — regex redaction masks SSNs, emails, credit cards, phone numbers. Also deobfuscates hex-encoded shell payloads and flags base64 secret exfiltration (read `.env` → base64 → POST).
 - **SafeFix** — advises safer command alternatives back to the agent via an `x-agent-safefix` header. It advises; it does not silently rewrite.
 - **Context-window guard** — rejects requests that would overflow the model's window instead of letting the provider truncate silently.

@@ -1,8 +1,14 @@
 name: Release
 
+# Tagging v* performs a real release. workflow_dispatch runs the same build
+# matrix as a dry run: binaries are compiled and uploaded as workflow artifacts,
+# but nothing is published to GHCR and no GitHub Release is created. This lets
+# the cross-compilation legs be validated before a tag exists, since a pushed
+# tag is public immediately.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -39,16 +45,39 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cross-compiler
+      # rusqlite builds SQLite from source, so cross-compiling needs both the
+      # linker and a matching C cross-compiler.
+      - name: Install aarch64 cross-compiler
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dryrun-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} --bin enlil
+
+      # Confirms the artifact is actually the right architecture and, on the
+      # native target, that it runs at all.
+      - name: Inspect binary
+        run: |
+          BIN=target/${{ matrix.target }}/release/enlil
+          ls -la "$BIN"
+          file "$BIN"
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "$(rustc -vV | sed -n 's/^host: //p')" ]; then
+            "$BIN" --version 2>/dev/null || echo "(no --version flag; binary is a server)"
+          fi
 
       - name: Package
         run: |
@@ -56,7 +85,7 @@ jobs:
           cp target/${{ matrix.target }}/release/enlil dist/
           cp README.md LICENSE dist/
           cd dist
-          tar czf ../enlil-${{ github.ref_name }}-${{ matrix.target }}.tar.gz enlil README.md LICENSE
+          tar czf ../enlil-${{ steps.v.outputs.version }}-${{ matrix.target }}.tar.gz enlil README.md LICENSE
 
       - uses: actions/upload-artifact@v4
         with:
@@ -64,24 +93,28 @@ jobs:
           path: enlil-*.tar.gz
 
   docker:
-    name: Publish image
+    name: Image (${{ github.ref_type == 'tag' && 'publish' || 'build only' }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Log in to GHCR
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # On a dry run this still builds both architectures, so a broken arm64
+      # image is caught here rather than after a tag is public.
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.ref_type == 'tag' }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/enlil:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/enlil:latest
@@ -92,6 +125,7 @@ jobs:
     name: GitHub Release
     runs-on: ubuntu-latest
     needs: build
+    if: github.ref_type == 'tag'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -102,3 +136,15 @@ jobs:
         with:
           generate_release_notes: true
           files: artifacts/*.tar.gz
+
+  summary:
+    name: Dry-run summary
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.ref_type != 'tag'
+    steps:
+      - run: |
+          echo "### Dry run complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All four target binaries built and both container architectures compiled." >> $GITHUB_STEP_SUMMARY
+          echo "Nothing was published. Push a \`v*\` tag to perform the real release." >> $GITHUB_STEP_SUMMARY

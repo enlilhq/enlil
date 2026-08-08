@@ -32,6 +32,10 @@ open http://localhost:8080   # every action your agents just took
 
 No signup. No config file. No cloud account. One binary.
 
+[![The Enlil dashboard: counters for requests, injection blocks, PII redactions and loop breaks, above a trace table showing method, path, protocol, status, latency and the governance decision for each request.](https://raw.githubusercontent.com/enlilhq/enlil/main/docs/dashboard.png)](https://raw.githubusercontent.com/enlilhq/enlil/main/docs/dashboard.png)
+
+*The dashboard is served from the binary itself — no separate frontend, no npm install. Every row is one agent action, with the decision Enlil made about it.*
+
 ### Why it works for any provider
 
 Enlil scans payloads **structurally, not by schema**. It walks every string in the

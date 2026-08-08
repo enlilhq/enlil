@@ -111,7 +111,12 @@ async fn rules(State(state): State<Arc<OssState>>) -> Json<serde_json::Value> {
 
 /// `GET /api/events/recent` — the local governance event feed.
 async fn recent_events(State(state): State<Arc<OssState>>) -> Json<serde_json::Value> {
-    let events = state.metrics.events.lock().unwrap().clone();
+    let events = state
+        .metrics
+        .events
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     Json(serde_json::json!({ "events": events }))
 }
 

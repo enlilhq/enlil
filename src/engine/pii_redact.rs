@@ -149,7 +149,7 @@ impl PiiVault {
         super_admin: bool,
         limit: usize,
     ) -> Vec<AuditEvent> {
-        let audit = self.audit.lock().unwrap();
+        let audit = self.audit.lock().unwrap_or_else(|e| e.into_inner());
         audit
             .iter()
             .rev()
@@ -175,7 +175,7 @@ impl PiiVault {
             tenant_id: tenant_id.to_string(),
             pii_type: pii_type.to_string(),
         };
-        let mut audit = self.audit.lock().unwrap();
+        let mut audit = self.audit.lock().unwrap_or_else(|e| e.into_inner());
         audit.push(event);
         if audit.len() > AUDIT_LOG_CAPACITY {
             let drain_to = audit.len() - AUDIT_LOG_CAPACITY;

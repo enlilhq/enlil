@@ -241,7 +241,7 @@ impl TraceStore {
     /// Load the most recent traces from SQLite into memory (called once at startup).
     fn hydrate(&self) {
         let Some(db) = &self.db else { return };
-        let conn = db.lock().unwrap();
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = match conn.prepare(
             "SELECT trace_id, timestamp, tenant_id, session_id, agent_id, method, path, protocol, \
              upstream, steps, cache, status, blocked, block_reason, latency_us, total_tokens, \
@@ -291,7 +291,7 @@ impl TraceStore {
         // Rows come newest-first; reverse so insertion order matches record() (newest last).
         let mut loaded: Vec<Trace> = rows.filter_map(|r| r.ok()).collect();
         loaded.reverse();
-        let mut order = self.order.lock().unwrap();
+        let mut order = self.order.lock().unwrap_or_else(|e| e.into_inner());
         for t in loaded {
             let id = t.trace_id.clone();
             self.traces.insert(id.clone(), t);
@@ -309,7 +309,7 @@ impl TraceStore {
         if snapshot.is_empty() {
             return;
         }
-        let conn = db.lock().unwrap();
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         for t in &snapshot {
             let steps_json = serde_json::to_string(&t.steps).unwrap_or_else(|_| "[]".to_string());
             let _ = conn.execute(
@@ -337,7 +337,7 @@ impl TraceStore {
     pub fn record(&self, trace: Trace) {
         let id = trace.trace_id.clone();
         self.traces.insert(id.clone(), trace);
-        let mut order = self.order.lock().unwrap();
+        let mut order = self.order.lock().unwrap_or_else(|e| e.into_inner());
         order.push_back(id);
         while order.len() > TRACE_CAPACITY {
             if let Some(old) = order.pop_front() {
@@ -380,7 +380,7 @@ impl TraceStore {
 
     /// List recent trace summaries (newest first), tenant-scoped unless super-admin.
     pub fn list(&self, caller_tenant: &str, super_admin: bool, limit: usize) -> Vec<TraceSummary> {
-        let order = self.order.lock().unwrap();
+        let order = self.order.lock().unwrap_or_else(|e| e.into_inner());
         order
             .iter()
             .rev()

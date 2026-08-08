@@ -44,6 +44,41 @@ Out of scope — these are documented design decisions, not vulnerabilities:
   complete. We don't claim the classifier is complete.
 - Findings against the commercial Plumb service rather than this crate.
 
+## Known advisories in dependencies
+
+Honesty is more useful here than a clean-looking `cargo audit`, so:
+
+**`cargo audit` currently reports 3 advisories against `rustls-webpki 0.101.7`**
+([RUSTSEC-2026-0098](https://rustsec.org/advisories/RUSTSEC-2026-0098),
+[-0099](https://rustsec.org/advisories/RUSTSEC-2026-0099),
+[-0104](https://rustsec.org/advisories/RUSTSEC-2026-0104) — two certificate
+name-constraint issues and a reachable panic in CRL parsing).
+
+**They are not reachable from a default build.** That version is pulled in only by
+the optional `lambda` feature, via `aws-config` → `aws-smithy-http-client` →
+`hyper-rustls 0.24` → `rustls 0.21`. Verified:
+
+| Build | TLS stack | Affected |
+|---|---|---|
+| default (`cargo install enlil`, the Docker image, release binaries) | `rustls 0.23` + `rustls-webpki 0.103.13` | **No** |
+| `--features lambda` | `rustls 0.21` + `rustls-webpki 0.101.7` | Yes |
+
+Reproduce with `cargo tree | grep rustls-webpki` versus
+`cargo tree --features lambda | grep rustls-webpki`. Removing the AWS
+dependencies entirely takes the tree from 316 to 250 crates and the advisory
+count to zero.
+
+`cargo audit` reads `Cargo.lock`, which is feature-agnostic, so it reports these
+regardless of whether you can reach them. There is no fix available upstream yet:
+`aws-config` exposes only a `rustls` feature, which *is* the legacy stack.
+
+If you enable `--features lambda`, you are trusting the AWS SDK's TLS stack for
+calls to AWS endpoints. If that isn't acceptable, don't enable the feature — the
+default SQLite trace backend has no AWS dependency at all. We intend to move the
+DynamoDB backend out of this crate so the OSS engine has no AWS dependency in any
+configuration.
+
+
 ## Supported versions
 
 Enlil is pre-1.0 and only the latest minor version receives fixes.

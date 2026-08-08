@@ -83,7 +83,7 @@ impl MetricsCollector {
             tenant_id: tenant_id.to_string(),
             detail: detail.to_string(),
         };
-        let mut events = self.events.lock().unwrap();
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         events.push(event);
         // Keep last 100 events
         if events.len() > 100 {
@@ -111,7 +111,7 @@ impl MetricsCollector {
             cache_hits: self.cache_hits.load(Ordering::Relaxed),
             cost_microdollars: self.cache_savings_microdollars.load(Ordering::Relaxed),
         };
-        let mut ts = self.time_series.lock().unwrap();
+        let mut ts = self.time_series.lock().unwrap_or_else(|e| e.into_inner());
         ts.push(point);
         if ts.len() > 360 {
             // keep ~1 hour at 10s intervals
@@ -121,7 +121,10 @@ impl MetricsCollector {
     }
 
     pub fn get_time_series(&self) -> Vec<TimeSeriesPoint> {
-        self.time_series.lock().unwrap().clone()
+        self.time_series
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 

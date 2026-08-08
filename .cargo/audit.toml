@@ -1,0 +1,34 @@
+# cargo-audit configuration.
+#
+# `cargo audit` reads Cargo.lock, which is feature-agnostic, so it reports
+# advisories for dependencies that no default build can reach. The ignores below
+# are exactly those cases, kept here (rather than as flags buried in CI) so they
+# are visible, reviewable, and easy to retire.
+#
+# Every entry must state why it is not reachable and what would remove it.
+# If you cannot write that sentence, it does not belong in this file.
+
+[advisories]
+ignore = [
+    # rustls-webpki 0.101.7 — two certificate name-constraint issues and a
+    # reachable panic in CRL parsing.
+    #
+    # Not reachable from a default build. This version is pulled in only by the
+    # optional `lambda` feature:
+    #   aws-config -> aws-smithy-http-client -> hyper-rustls 0.24 -> rustls 0.21
+    #                                                            -> rustls-webpki 0.101.7
+    # A default build resolves rustls 0.23 + rustls-webpki 0.103.13, which are
+    # unaffected. Verify with:
+    #   cargo tree                  | grep rustls-webpki   # -> 0.103.13
+    #   cargo tree --features lambda| grep rustls-webpki   # -> 0.101.7 as well
+    #
+    # No upstream fix is available: aws-config exposes only a `rustls` feature,
+    # and that feature *is* the legacy stack.
+    #
+    # Retire these by moving the DynamoDB trace backend into the cloud crate, so
+    # the engine carries no AWS dependency in any configuration. Dropping the AWS
+    # deps takes the tree from 316 to 250 crates and the advisory count to zero.
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+]

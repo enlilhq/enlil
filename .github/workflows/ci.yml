@@ -64,22 +64,14 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      # Hard gate on the DEFAULT feature set -- what every user actually gets via
-      # `cargo install enlil`, the Docker image, or a release binary. A known
-      # advisory reachable from a default build should fail the build.
+      # Fails the build on any advisory that is reachable from a real build.
       #
-      # The optional `lambda` feature pulls the AWS SDK, which currently carries a
-      # legacy rustls (RUSTSEC-2026-0098/0099/0104 in rustls-webpki 0.101). That is
-      # upstream in aws-smithy-http-client and not reachable from a default build,
-      # so it is reported below without failing CI. See SECURITY.md.
-      - name: Audit (default features — blocking)
+      # cargo audit reads Cargo.lock, which is feature-agnostic, so advisories
+      # that only the optional `lambda` feature can reach are listed as explicit,
+      # documented exceptions in .cargo/audit.toml rather than silently skipped.
+      # Each one records why it is unreachable and what would retire it.
+      - name: Audit dependencies
         run: cargo audit --deny warnings
-
-      - name: Audit including optional lambda feature (informational)
-        run: |
-          echo "The lambda feature pulls the AWS SDK; known advisories there are"
-          echo "documented in SECURITY.md and are not reachable from a default build."
-        continue-on-error: true
 
   docker:
     name: Docker build

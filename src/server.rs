@@ -111,12 +111,7 @@ async fn rules(State(state): State<Arc<OssState>>) -> Json<serde_json::Value> {
 
 /// `GET /api/events/recent` — the local governance event feed.
 async fn recent_events(State(state): State<Arc<OssState>>) -> Json<serde_json::Value> {
-    let events = state
-        .metrics
-        .events
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let events = state.metrics.events.lock().unwrap().clone();
     Json(serde_json::json!({ "events": events }))
 }
 
@@ -138,7 +133,7 @@ pub async fn build_oss_app(config: ProxyConfig) -> Router {
             get(|| async {
                 Json(serde_json::json!({
                     "service": "enlil",
-                    "description": "Open-source control and audit plane for AI agent actions",
+                    "description": "Source-available control and audit plane for AI agent actions",
                     "endpoints": {
                         "health": "/health",
                         "ui": "/",

@@ -1,4 +1,4 @@
-# Enlil — the open-source control and audit plane for AI agent actions.
+# Enlil — the source-available control and audit plane for AI agent actions.
 #
 #   docker build -t enlil .
 #   docker run -p 8080:8080 -v enlil-data:/data enlil

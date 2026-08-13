@@ -1,10 +1,14 @@
 # Enlil
 
-**The open-source control and audit plane for AI agent actions.**
+**The source-available control and audit plane for AI agent actions.**
 
 Enlil sits inline between your agents and any model or tool, and answers the question that keeps agents out of production: **what is this agent allowed to do, and can you prove what it did?**
 
 Claude secures Claude. Enlil governs *everything* your agents touch — every model, every tool, one audit trail you own.
+
+[![Enlil blocks a prompt-injection attempt and records the decision in its local audit trail.](https://raw.githubusercontent.com/enlilhq/enlil/main/docs/demo.gif)](https://github.com/enlilhq/enlil)
+
+*One real Enlil process: a prompt-injection attempt is blocked before the provider, then retrieved from the local audit trail.*
 
 ```bash
 cargo install enlil

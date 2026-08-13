@@ -15,7 +15,7 @@ If you don't hear back, assume the mail went astray and open a public issue
 asking us to check our inbox — an unanswered report is worse than a public one.
 
 We'll credit you in the release notes and `CHANGELOG.md` unless you'd rather stay
-anonymous. There's no bug bounty; Enlil is an unfunded open-source project and
+anonymous. There's no bug bounty; Enlil is a small source-available project and
 we'd rather be honest about that than imply a payout.
 
 ## Scope
@@ -55,16 +55,16 @@ Honesty is more useful here than a clean-looking `cargo audit`, so:
 name-constraint issues and a reachable panic in CRL parsing).
 
 **They are not reachable from a default build.** That version is pulled in only by
-the optional `lambda` feature, via `aws-config` → `aws-smithy-http-client` →
+the optional `aws` feature, via `aws-config` → `aws-smithy-http-client` →
 `hyper-rustls 0.24` → `rustls 0.21`. Verified:
 
 | Build | TLS stack | Affected |
 |---|---|---|
 | default (`cargo install enlil`, the Docker image, release binaries) | `rustls 0.23` + `rustls-webpki 0.103.13` | **No** |
-| `--features lambda` | `rustls 0.21` + `rustls-webpki 0.101.7` | Yes |
+| `--features aws` | `rustls 0.21` + `rustls-webpki 0.101.7` | Yes |
 
 Reproduce with `cargo tree | grep rustls-webpki` versus
-`cargo tree --features lambda | grep rustls-webpki`. Removing the AWS
+`cargo tree --features aws | grep rustls-webpki`. Removing the AWS
 dependencies entirely takes the tree from 316 to 250 crates and the advisory
 count to zero.
 
@@ -72,7 +72,7 @@ count to zero.
 regardless of whether you can reach them. There is no fix available upstream yet:
 `aws-config` exposes only a `rustls` feature, which *is* the legacy stack.
 
-If you enable `--features lambda`, you are trusting the AWS SDK's TLS stack for
+If you enable `--features aws`, you are trusting the AWS SDK's TLS stack for
 calls to AWS endpoints. If that isn't acceptable, don't enable the feature — the
 default SQLite trace backend has no AWS dependency at all. We intend to move the
 DynamoDB backend out of this crate so the OSS engine has no AWS dependency in any

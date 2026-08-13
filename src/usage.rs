@@ -20,6 +20,10 @@ use std::future::Future;
 /// Owned rather than borrowed: this is built once per request *after* the response
 /// has been handled (off the latency-critical path), so the allocations are
 /// irrelevant and owning the data keeps the hook free of lifetime plumbing.
+/// Adding a field here is a breaking change for anyone constructing this by hand, which is why
+/// it is `#[non_exhaustive]`: downstream crates consume `UsageEvent` in `record_usage` rather
+/// than building it, so marking it now means the next field costs nobody a major version.
+#[non_exhaustive]
 pub struct UsageEvent {
     pub tenant_id: String,
     pub api_key_id: Option<uuid::Uuid>,
@@ -32,6 +36,18 @@ pub struct UsageEvent {
     pub completion_tokens: u32,
     pub protocol: String,
     pub path: String,
+    /// End-to-end handling time for this request.
+    ///
+    /// Previously the cloud implementation wrote a hardcoded `0` into `usage_logs.latency_ms`
+    /// for every row, so the column was uniformly false and any latency shown per tenant was
+    /// either fabricated or came from process-local counters that reset on restart.
+    pub latency_us: u64,
+    /// Whether this request was served from the response cache instead of the provider.
+    ///
+    /// Also previously hardcoded, to `false`. Combined with cache hits never reaching
+    /// `record_usage` at all, that made `usage_logs.cache_hit` always false and undercounted
+    /// `total_requests` by exactly the number of cached responses.
+    pub cache_hit: bool,
 }
 
 /// The environment the proxy handler runs in.
@@ -76,5 +92,19 @@ pub trait ProxyEnv: std::ops::Deref<Target = EnlilState> + Send + Sync + 'static
         _message: &str,
     ) -> impl Future<Output = ()> + Send {
         async {}
+    }
+
+    /// How long a trace for this tenant should be retained, in days, before it is
+    /// eligible for deletion.
+    ///
+    /// OSS default: `None`, meaning no expiry — `enlil` is single-tenant and
+    /// self-hosted, so there is no tier to derive a retention policy from, and
+    /// the operator owns their own storage and eviction (`TRACE_CAPACITY` /
+    /// `TRACE_DB_CAPACITY` still apply as a size bound regardless).
+    /// Cloud: looks up the tenant's tier and returns its retention window
+    /// (free/growth/enterprise), so `Trace.expires_at` can be set at write time —
+    /// see `crate::observability::Trace::with_retention`.
+    fn retention_days(&self, _tenant_id: &str) -> Option<u32> {
+        None
     }
 }

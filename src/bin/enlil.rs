@@ -33,7 +33,7 @@ async fn main() {
 
     tracing::info!(
         upstream = %config.upstream_url,
-        "enlil — open-source control and audit plane for AI agent actions"
+        "enlil — source-available control and audit plane for AI agent actions"
     );
 
     let app = build_oss_app(config).await;

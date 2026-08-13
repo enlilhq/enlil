@@ -8,15 +8,39 @@ pub struct CachedResponse {
     pub content_type: String,
     /// blake3 hash of body for integrity validation (cache poisoning prevention)
     pub integrity_hash: String,
+    /// What the upstream call that produced this body actually cost, in microdollars.
+    ///
+    /// Stored so a cache hit can report the real saving. The hit path used to add a flat
+    /// `4000` microdollars — $0.004 — per hit and present the running total as a dollar figure
+    /// on the dashboard. That number was invented: it had no relationship to the model, the
+    /// token count, or the provider's pricing.
+    pub cost_micro: u64,
+    /// Tokens the original call consumed, for the same reason.
+    pub total_tokens: u32,
 }
 
 impl CachedResponse {
+    /// A cache entry with no recorded cost. Used where the cost is genuinely unknown — for
+    /// example overwriting a corrupted entry — so a hit on it reports a saving of zero rather
+    /// than a guess.
     pub fn new(body: Bytes, content_type: String) -> Self {
+        Self::with_cost(body, content_type, 0, 0)
+    }
+
+    /// A cache entry that remembers what producing it cost.
+    pub fn with_cost(
+        body: Bytes,
+        content_type: String,
+        cost_micro: u64,
+        total_tokens: u32,
+    ) -> Self {
         let integrity_hash = blake3::hash(&body).to_hex().to_string();
         Self {
             body,
             content_type,
             integrity_hash,
+            cost_micro,
+            total_tokens,
         }
     }
 

@@ -1,6 +1,6 @@
-//! DynamoDB-backed trace store — the Lambda-compatible alternative to
-//! [`super::TraceStore`] (SQLite + in-memory DashMap). Only compiled with
-//! `--features lambda`.
+//! DynamoDB-backed trace store — the alternative to [`super::TraceStore`] (SQLite +
+//! in-memory DashMap) for deployments without a durable local filesystem. Only
+//! compiled with `--features aws`.
 //!
 //! Table shape (see `infra/dynamodb.md`):
 //!   trace_id (String)  — partition key (primary lookup: `get_scoped`)
@@ -203,6 +203,91 @@ impl DynamoTraceStore {
             }
         }
     }
+
+    /// Delete every trace belonging to a tenant. Used when a tenant is deleted, so its
+    /// history cannot be inherited by a future tenant that reuses the same slug — tenant
+    /// identity here is the slug, and slugs are not reserved after deletion.
+    ///
+    /// The GSI gives cheap tenant-scoped reads but DynamoDB has no bulk delete-by-query;
+    /// each item still costs its own `DeleteItem`. Paginates the GSI query and batches
+    /// deletes 25 at a time (`BatchWriteItem`'s limit). Returns the number of items
+    /// deleted, so callers can log/assert on it rather than assuming success.
+    pub async fn delete_by_tenant(&self, tenant_id: &str) -> usize {
+        let mut deleted = 0usize;
+        let mut exclusive_start_key = None;
+
+        loop {
+            let mut query = self
+                .client
+                .query()
+                .table_name(&self.table)
+                .index_name(GSI_NAME)
+                .key_condition_expression("tenant_id = :t")
+                .expression_attribute_values(":t", AttributeValue::S(tenant_id.to_string()));
+            if let Some(key) = exclusive_start_key.take() {
+                query = query.set_exclusive_start_key(Some(key));
+            }
+
+            let result = match query.send().await {
+                Ok(out) => out,
+                Err(e) => {
+                    tracing::error!(
+                        "DynamoDB delete_by_tenant query failed for '{}': {}",
+                        tenant_id,
+                        e
+                    );
+                    break;
+                }
+            };
+
+            let trace_ids: Vec<String> = result
+                .items
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|item| item.get("trace_id").and_then(|v| v.as_s().ok()).cloned())
+                .collect();
+
+            for chunk in trace_ids.chunks(25) {
+                let requests: Vec<_> = chunk
+                    .iter()
+                    .map(|id| {
+                        let mut key = HashMap::new();
+                        key.insert("trace_id".to_string(), AttributeValue::S(id.clone()));
+                        aws_sdk_dynamodb::types::WriteRequest::builder()
+                            .delete_request(
+                                aws_sdk_dynamodb::types::DeleteRequest::builder()
+                                    .set_key(Some(key))
+                                    .build()
+                                    .expect("delete request key is set"),
+                            )
+                            .build()
+                    })
+                    .collect();
+                if let Err(e) = self
+                    .client
+                    .batch_write_item()
+                    .request_items(&self.table, requests)
+                    .send()
+                    .await
+                {
+                    tracing::error!(
+                        "DynamoDB delete_by_tenant batch delete failed for '{}': {}",
+                        tenant_id,
+                        e
+                    );
+                } else {
+                    deleted += chunk.len();
+                }
+            }
+
+            exclusive_start_key = result.last_evaluated_key;
+            if exclusive_start_key.is_none() {
+                break;
+            }
+        }
+
+        deleted
+    }
 }
 
 fn trace_to_item(t: &Trace) -> HashMap<String, AttributeValue> {
@@ -280,6 +365,17 @@ fn trace_to_item(t: &Trace) -> HashMap<String, AttributeValue> {
         "replay_method".to_string(),
         AttributeValue::S(t.replay_method.clone()),
     );
+    if let Some(expires_at) = t.expires_at {
+        // Attribute name matches the SQLite column and the field on `Trace` itself.
+        // Registering this as the table's native TTL attribute (a one-time `aws dynamodb
+        // update-time-to-live` operation, done outside application code) lets DynamoDB
+        // expire these automatically instead of relying solely on an application-level
+        // sweep — see module docs.
+        item.insert(
+            "expires_at".to_string(),
+            AttributeValue::N(expires_at.to_string()),
+        );
+    }
     item
 }
 
@@ -378,5 +474,9 @@ fn item_to_trace(item: &HashMap<String, AttributeValue>) -> Option<Trace> {
             .and_then(|v| v.as_s().ok())
             .cloned()
             .unwrap_or_else(|| "POST".to_string()),
+        expires_at: item
+            .get("expires_at")
+            .and_then(|v| v.as_n().ok())
+            .and_then(|s| s.parse().ok()),
     })
 }

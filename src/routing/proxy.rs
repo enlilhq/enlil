@@ -208,6 +208,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
             trace.block_reason = Some("agent_loop_detected".to_string());
             trace.status = 429;
             trace.latency_us = trace_start.elapsed().as_micros() as u64;
+            trace.set_retention(state.retention_days(&tenant_id));
             state.trace_store.record(trace).await;
 
             return Err(AppError::LoopDetected(format!(
@@ -381,6 +382,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
                 trace.block_reason = Some("prompt_injection_blocked".to_string());
                 trace.status = 403;
                 trace.latency_us = trace_start.elapsed().as_micros() as u64;
+                trace.set_retention(state.retention_days(&tenant_id));
                 state.trace_store.record(trace).await;
 
                 return Err(AppError::InjectionBlocked(format!(
@@ -469,6 +471,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
             trace.block_reason = Some(format!("policy_blocked:{}", rule_id));
             trace.status = 403;
             trace.latency_us = trace_start.elapsed().as_micros() as u64;
+            trace.set_retention(state.retention_days(&tenant_id));
             state.trace_store.record(trace).await;
 
             return Err(AppError::PolicyBlocked(format!(
@@ -512,6 +515,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
         trace.block_reason = Some("context_overflow".to_string());
         trace.status = 500;
         trace.latency_us = trace_start.elapsed().as_micros() as u64;
+        trace.set_retention(state.retention_days(&tenant_id));
         state.trace_store.record(trace).await;
         return Err(AppError::Internal(format!(
             "Request exceeds model context window: ~{} tokens estimated, {} max for {}",
@@ -539,10 +543,14 @@ pub async fn handle_proxy<E: ProxyEnv>(
                 } else {
                     info!("Cache HIT for hash: {}", hash);
                     state.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    // The saving is what the original call actually cost, recorded on the entry
+                    // when it was stored. This used to add a flat 4000 microdollars — $0.004 —
+                    // per hit regardless of model or token count, and the dashboard presented
+                    // the running total as a dollar figure.
                     state
                         .metrics
                         .cache_savings_microdollars
-                        .fetch_add(4000, Ordering::Relaxed);
+                        .fetch_add(cached_res.cost_micro, Ordering::Relaxed);
                     state.metrics.record_event(
                         "cache_hit",
                         &tenant_id,
@@ -553,6 +561,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
                     trace.cache = "hit".to_string();
                     trace.status = 200;
                     trace.latency_us = trace_start.elapsed().as_micros() as u64;
+                    trace.set_retention(state.retention_days(&tenant_id));
                     state.trace_store.record(trace).await;
 
                     let response = axum::response::Response::builder()
@@ -563,6 +572,37 @@ pub async fn handle_proxy<E: ProxyEnv>(
                         Some(note) => response.header("x-agent-safefix", note),
                         None => response,
                     };
+                    // Record the request before returning. This path used to return here
+                    // without calling record_usage at all, so a cached response was invisible:
+                    // it never reached usage_logs, `total_requests` undercounted by exactly the
+                    // number of cache hits, and `usage_logs.cache_hit` was never once true.
+                    //
+                    // Cost and tokens are zero because nothing was sent to the provider — that
+                    // is the point of the cache. The saved amount is reported separately, above.
+                    // The model comes from the request body, which is what the client asked for.
+                    let cached_model = parsed
+                        .as_ref()
+                        .and_then(|v| v.get("model"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    state
+                        .record_usage(UsageEvent {
+                            tenant_id: tenant_id.to_string(),
+                            api_key_id,
+                            model: cached_model,
+                            usage: crate::tokens::TokenUsage::default(),
+                            cost_micro: 0,
+                            total_tokens: 0,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            protocol: protocol.to_string(),
+                            path: path.clone(),
+                            latency_us: trace_start.elapsed().as_micros() as u64,
+                            cache_hit: true,
+                        })
+                        .await;
+
                     let response = response
                         .header("content-type", cached_res.content_type)
                         .body(Body::from(cached_res.body))
@@ -675,6 +715,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
         trace.status = status.as_u16();
         trace.step(format!("upstream_status={}", status.as_u16()));
         trace.latency_us = trace_start.elapsed().as_micros() as u64;
+        trace.set_retention(state.retention_days(&tenant_id));
         state.trace_store.record(trace).await;
 
         // Process usage/caching in the same task (no race condition)
@@ -692,6 +733,7 @@ pub async fn handle_proxy<E: ProxyEnv>(
                 tool_tokens_est,
                 memory_tokens_est,
                 &trace_id,
+                trace_start.elapsed().as_micros() as u64,
             )
             .await;
         }
@@ -726,6 +768,8 @@ pub async fn handle_proxy<E: ProxyEnv>(
     trace.status = stream_status;
     trace.step(format!("upstream_status={} (streaming)", stream_status));
     trace.latency_us = trace_start.elapsed().as_micros() as u64;
+    let stream_start_latency_us = trace.latency_us;
+    trace.set_retention(state.retention_days(&tenant_id));
     state.trace_store.record(trace).await;
 
     tokio::spawn(async move {
@@ -742,6 +786,9 @@ pub async fn handle_proxy<E: ProxyEnv>(
             tool_tokens_est,
             memory_tokens_est,
             trace_id_clone,
+            // Streaming: measured to the point the response started, since the body is still
+            // arriving. Honest about what it means rather than leaving the column at zero.
+            stream_start_latency_us,
         )
         .await;
     });
@@ -793,6 +840,9 @@ async fn process_response_body<E: ProxyEnv>(
     tool_tokens_est: u32,
     memory_tokens_est: u32,
     trace_id: &str,
+    // End-to-end handling time, passed in because the caller owns the start instant. Recorded
+    // per usage row instead of the hardcoded 0 the cloud implementation used to write.
+    latency_us: u64,
 ) {
     // Capture a response fingerprint for deterministic replay diffing.
     let response_hash = blake3::hash(body).to_hex().to_string();
@@ -801,10 +851,12 @@ async fn process_response_body<E: ProxyEnv>(
         .enrich_usage(trace_id, 0, 0, Some(response_hash))
         .await;
 
-    if let Some(hash) = request_hash {
-        let cached_res = CachedResponse::new(body.clone(), content_type.to_string());
-        state.cache_manager.insert(&hash, cached_res).await;
-    }
+    // What this call cost, filled in below once the provider's usage block has been parsed.
+    // The cache entry is written *after* that, so a later hit can report the real saving instead
+    // of a fabricated constant. A body whose usage cannot be parsed is still cached, with a
+    // recorded cost of zero — a hit on it then claims no saving rather than inventing one.
+    let mut observed_cost_micro: u64 = 0;
+    let mut observed_total_tokens: u32 = 0;
 
     let body_str = String::from_utf8_lossy(body);
     if let Ok(json_body) = serde_json::from_str::<serde_json::Value>(&body_str) {
@@ -836,6 +888,10 @@ async fn process_response_body<E: ProxyEnv>(
 
                     // Track per-agent usage (cache-aware cost)
                     let cost_micro = crate::tokens::calculate_cost_detailed(model, &token_usage);
+                    // Remembered so the cache entry written below carries what this call really
+                    // cost, which is what a later hit reports as its saving.
+                    observed_cost_micro = cost_micro;
+                    observed_total_tokens = total_tokens;
                     state
                         .agent_registry
                         .record(tenant_id, agent_id, total_tokens, cost_micro);
@@ -859,11 +915,25 @@ async fn process_response_body<E: ProxyEnv>(
                             completion_tokens: provider_usage.completion_tokens,
                             protocol: protocol.to_string(),
                             path: path.to_string(),
+                            latency_us,
+                            // A real upstream call, by definition not a cache hit.
+                            cache_hit: false,
                         })
                         .await;
                 }
             }
         }
+    }
+
+    // Cache last, so the entry records the cost measured above.
+    if let Some(hash) = request_hash {
+        let cached_res = CachedResponse::with_cost(
+            body.clone(),
+            content_type.to_string(),
+            observed_cost_micro,
+            observed_total_tokens,
+        );
+        state.cache_manager.insert(&hash, cached_res).await;
     }
 }
 
@@ -882,6 +952,7 @@ async fn process_response_body_streaming<E: ProxyEnv>(
     tool_tokens_est: u32,
     memory_tokens_est: u32,
     trace_id: String,
+    latency_us: u64,
 ) {
     let mut full_body = Vec::new();
     let mut stream_success = false;
@@ -908,10 +979,10 @@ async fn process_response_body_streaming<E: ProxyEnv>(
         .enrich_usage(&trace_id, 0, 0, Some(response_hash))
         .await;
 
-    if let Some(hash) = request_hash {
-        let cached_res = CachedResponse::new(Bytes::from(full_body.clone()), content_type.clone());
-        state.cache_manager.insert(&hash, cached_res).await;
-    }
+    // Same deferral as the non-streaming path: cache after the cost is known, so a hit
+    // reports the real saving instead of a constant.
+    let mut observed_cost_micro: u64 = 0;
+    let mut observed_total_tokens: u32 = 0;
 
     let body_str = String::from_utf8_lossy(&full_body);
     let mut usage_value = None;
@@ -974,6 +1045,8 @@ async fn process_response_body_streaming<E: ProxyEnv>(
 
                 // Track per-agent usage (cache-aware cost)
                 let cost_micro = crate::tokens::calculate_cost_detailed(&model, &token_usage);
+                observed_cost_micro = cost_micro;
+                observed_total_tokens = total_tokens;
                 state
                     .agent_registry
                     .record(&tenant_id, &agent_id, total_tokens, cost_micro);
@@ -995,10 +1068,23 @@ async fn process_response_body_streaming<E: ProxyEnv>(
                         completion_tokens: provider_usage.completion_tokens,
                         protocol: protocol.clone(),
                         path: path.clone(),
+                        latency_us,
+                        cache_hit: false,
                     })
                     .await;
             }
         }
+    }
+
+    // Cache last, carrying the measured cost.
+    if let Some(hash) = request_hash {
+        let cached_res = CachedResponse::with_cost(
+            Bytes::from(full_body.clone()),
+            content_type.clone(),
+            observed_cost_micro,
+            observed_total_tokens,
+        );
+        state.cache_manager.insert(&hash, cached_res).await;
     }
 }
 

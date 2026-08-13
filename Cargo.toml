@@ -1,9 +1,8 @@
 [package]
 name = "enlil"
-version = "0.1.1"
+version = "0.3.0"
 edition = "2021"
-rust-version = "1.85"
-description = "Vendor-neutral open-source control and audit plane for AI agent actions. Sits inline between your agents and any model or tool: enforce what each agent may do, and prove what it did."
+description = "Vendor-neutral source-available control and audit plane for AI agent actions. Sits inline between your agents and any model or tool: enforce what each agent may do, and prove what it did."
 authors = ["Samji Technologies Private Limited"]
 license = "BUSL-1.1"
 readme = "README.md"
@@ -12,7 +11,11 @@ homepage = "https://enlil.samji.in"
 documentation = "https://docs.rs/enlil"
 keywords = ["ai", "agents", "security", "proxy", "observability"]
 categories = ["web-programming::http-server", "network-programming"]
-exclude = ["data/", "*.db"]
+# `docs/` is excluded from the published crate: the README references its images by absolute
+# raw.githubusercontent.com URL (which is what crates.io requires anyway — relative image
+# paths don't render there), so shipping them inside the crate adds ~1.2MB to every download
+# for no benefit.
+exclude = ["data/", "*.db", "docs/"]
 
 [dependencies]
 async-stream = "0.3.6"
@@ -44,9 +47,10 @@ aws-sdk-dynamodb = { version = "1.116.0", optional = true }
 
 [features]
 default = []
-# Enables the DynamoDB-backed trace store, for environments where the local
-# filesystem is not durable (e.g. AWS Lambda).
-lambda = ["aws-config", "aws-sdk-dynamodb"]
+# Enables the DynamoDB-backed trace store, for deployment targets without a durable local
+# filesystem. Renamed from `lambda` in 0.3.0: this crate has never had a Lambda-runtime
+# dependency, only the optional AWS SDK for DynamoDB, so the old name was misleading.
+aws = ["aws-config", "aws-sdk-dynamodb"]
 
 [[bin]]
 name = "enlil"

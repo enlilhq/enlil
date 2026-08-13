@@ -186,12 +186,11 @@ pub fn env_or(key: &str, default: &str) -> String {
 
 /// Resolves the on-disk path for a SQLite-backed store file.
 ///
-/// Defaults to `data/<name>`. Set `DATA_DIR` to override — e.g. the Lambda binary
-/// points this at `/tmp/data`, since `/tmp` is the only writable filesystem in the
-/// Lambda execution environment. Note this is a stopgap: `/tmp` is not guaranteed to
-/// persist or be shared across invocations/concurrent execution environments, so
-/// metrics/traces/memory history is not reliably durable on Lambda until migrated
-/// to DynamoDB.
+/// Defaults to `data/<name>`. Set `DATA_DIR` to override — e.g. a container image
+/// mounts a volume elsewhere, or points this at a scratch directory on a deployment
+/// target with no durable local filesystem, in which case metrics/traces/memory
+/// history is not reliably durable until migrated to a networked backend (DynamoDB,
+/// for the AWS-backed builds gated behind `--features aws`).
 pub fn data_path(name: &str) -> String {
     let dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string());
     format!("{}/{}", dir.trim_end_matches('/'), name)

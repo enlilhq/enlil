@@ -5,6 +5,70 @@ All notable changes to Enlil are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [semver](https://semver.org/).
 
+## [0.3.0] — 2026-08-13
+
+### Added
+
+- **Per-trace retention windows.** `Trace.expires_at: Option<u64>` and
+  `Trace::set_retention(Option<u32>)` stamp an expiry once, at record time. Deliberately
+  **not retroactive**: changing the retention that applies to a tenant affects traces
+  recorded from then on, not ones already written.
+- **`ProxyEnv::retention_days(&self, tenant_id: &str) -> Option<u32>`**, a new trait hook
+  whose default is `None` (no expiry). The OSS build is single-tenant and self-hosted, so
+  there is no tier to derive a window from and nothing changes unless you implement it.
+- **`TraceSummary.block_reason: Option<String>`** — *why* a request was blocked, not just
+  that something stopped it.
+- **`delete_by_tenant(tenant_id) -> usize`** on the trace stores (SQLite/in-memory and the
+  optional DynamoDB one), for deleting everything one tenant owns.
+
+### Changed
+
+- **Breaking: the `lambda` Cargo feature is renamed `aws`.** It only ever gated the optional
+  AWS SDK dependencies behind the DynamoDB trace store — it never implied the Lambda
+  runtime, and this crate has no Lambda-runtime dependency at all. If you build with
+  `features = ["lambda"]`, switch to `features = ["aws"]`.
+- **Breaking: `Trace` gained a public field** (`expires_at`). `Trace` is not
+  `#[non_exhaustive]`, so code constructing one via a struct literal needs updating;
+  `Trace::start` is unaffected and is the intended constructor.
+- **Trace eviction is now per tenant instead of globally oldest-first.** A high-volume
+  tenant could previously evict a quiet tenant's history out of the store entirely, since
+  both the in-memory capacity bound and the SQLite one shared a single global queue. Both
+  are now bounded per tenant (the SQLite side via a
+  `ROW_NUMBER() OVER (PARTITION BY tenant_id ...)` window).
+- **SQLite trace persistence now deletes expired rows** (past their `expires_at`) before
+  applying the capacity bound.
+- `docs/` is excluded from the published package. The README references its images by
+  absolute URL — which is what crates.io requires anyway — so shipping them added roughly
+  1.2 MB to every download for no benefit.
+
+### Security
+
+- Mutex poisoning no longer propagates panics through the trace store, the telemetry
+  middleware, or the PII redaction path. A thread panicking while holding one of these
+  locks previously poisoned it and turned every later access into a panic; they now
+  recover the guard with `unwrap_or_else(|e| e.into_inner())`.
+
+## [0.2.0] — never published
+
+Bumped in-tree but never released to crates.io, which is why the published history jumps
+from 0.1.1 to 0.3.0. Its changes ship as part of 0.3.0 and are recorded here so the
+version history isn't misleading.
+
+### Added
+
+- `UsageEvent.latency_us: u64` and `UsageEvent.cache_hit: bool`.
+- `UsageEvent` is now `#[non_exhaustive]`. Downstream crates consume it in `record_usage`
+  rather than constructing it, so marking it means the next added field costs nobody a
+  major version.
+
+### Fixed
+
+- **Cache hits never reached `record_usage`.** Responses served from the cache bypassed
+  usage recording entirely, so they were missing from request totals and `cache_hit` was
+  uniformly `false`.
+- **Latency was hardcoded to `0`** rather than measured, making any reported per-request
+  latency either fabricated or sourced from process-local counters that reset on restart.
+
 ## [0.1.1] — 2026-08-08
 
 ### Fixed

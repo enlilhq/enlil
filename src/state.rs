@@ -12,7 +12,7 @@ use crate::routing::circuit_breaker::CircuitBreaker;
 
 /// The **OSS (Enlil) core state.**
 ///
-/// Holds only the concerns that ship in the open-source `enlil` binary: the inline
+/// Holds only the concerns that ship in the source-available `enlil` binary: the inline
 /// enforcement engine, the exact-intent cache, local observability, and the HTTP
 /// client/config needed to proxy a request.
 ///
@@ -40,7 +40,7 @@ pub struct EnlilState {
 impl EnlilState {
     /// Builds the OSS core from configuration.
     ///
-    /// Shared by the open-source `enlil` binary and the cloud `plumb` binary, so
+    /// Shared by the source-available `enlil` binary and the cloud `plumb` binary, so
     /// both run an identical enforcement engine.
     pub async fn from_config(config: ProxyConfig) -> Self {
         let client = Client::builder()

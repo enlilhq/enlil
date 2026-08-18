@@ -98,4 +98,4 @@ Worth stating plainly, since it's a proxy and sees everything:
 - **Nothing is sent anywhere.** There is no telemetry, no phone-home, no analytics,
   and no network egress other than the upstream request you asked for.
 - **Redacted PII** is held in a local in-process vault so redaction can be
-  reversed. It is not persisted to disk in the open-source build.
+  reversed. It is not persisted to disk in the source-available build.

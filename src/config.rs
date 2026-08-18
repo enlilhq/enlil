@@ -103,7 +103,7 @@ impl ProxyConfig {
         }
     }
 
-    /// Configuration for the **open-source, single-tenant** build.
+    /// Configuration for the **source-available, single-tenant** build.
     ///
     /// Identical to [`from_env`](Self::from_env) except that it does not touch any
     /// of the multi-tenant/cloud fields. In particular it does not resolve a JWT

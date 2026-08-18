@@ -1,4 +1,4 @@
-//! # Enlil — the open-source control and audit plane for AI agent actions
+//! # Enlil — the source-available control and audit plane for AI agent actions
 //!
 //! Enlil sits inline between your agents and any upstream model or tool, and
 //! answers the question that blocks agents from reaching production: **what is

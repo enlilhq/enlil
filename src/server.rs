@@ -1,4 +1,4 @@
-//! # Enlil — the open-source agent control plane
+//! # Enlil — the source-available agent control plane
 //!
 //! This module is the **entire OSS server**: a single-tenant, zero-config,
 //! self-hostable proxy that shows and controls what your AI agents actually do.

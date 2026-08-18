@@ -1,6 +1,6 @@
 //! The **OSS ↔ cloud seam** for the proxy hot path.
 //!
-//! `routing::proxy` is the heart of the open-source `enlil` binary, but it needs
+//! `routing::proxy` is the heart of the source-available `enlil` binary, but it needs
 //! two things the OSS build deliberately does not have: per-tenant billing/quota
 //! accounting, and a database-backed per-tenant upstream override.
 //!
@@ -56,7 +56,7 @@ pub struct UsageEvent {
 /// access in the proxy continues to resolve against the OSS core state.
 ///
 /// Both methods default to OSS behaviour (no proprietary accounting), so the
-/// open-source build simply does not implement them.
+/// source-available build simply does not implement them.
 pub trait ProxyEnv: std::ops::Deref<Target = EnlilState> + Send + Sync + 'static {
     /// A per-tenant upstream override, if the deployment has one configured.
     ///

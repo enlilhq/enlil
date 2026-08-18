@@ -1,4 +1,4 @@
-//! `enlil` — the open-source agent control plane.
+//! `enlil` — the source-available agent control plane.
 //!
 //! Zero configuration required. Point your OpenAI-compatible client's `base_url`
 //! at this process and every agent action is recorded, governed, and queryable:

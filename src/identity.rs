@@ -1,6 +1,6 @@
 //! Request identity — **OSS (Enlil) core.**
 //!
-//! This is deliberately minimal and dependency-free so the open-source `enlil`
+//! This is deliberately minimal and dependency-free so the source-available `enlil`
 //! binary can attribute a request to a caller without pulling in the proprietary
 //! multi-tenant auth stack (`middleware::auth`), which owns JWT validation,
 //! API-key lookup, admin authorization and the tenant registry.
